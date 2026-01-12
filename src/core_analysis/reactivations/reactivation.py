@@ -12,7 +12,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.backends.backend_pdf import PdfPages
-from scipy.stats import pearsonr, linregress
+from scipy.stats import pearsonr, linregress, friedmanchisquare
 from scipy.signal import find_peaks
 from scipy.ndimage import gaussian_filter1d
 from joblib import Parallel, delayed
@@ -37,10 +37,10 @@ n_map_trials = 40  # Number of mapping trials to use
 
 # Template and event detection parameters
 threshold_type = 'percentile'  # Options: 'percentile' or 'max' (FWER)
-threshold_mode = 'day'  # Options: 'mouse' (baseline-derived, same for all days) or 'day' (per-day thresholds)
-threshold_dff = None  # 5% dff threshold for including cells in template (use None for all cells)
+threshold_mode = 'mouse'  # Options: 'mouse' (baseline-derived, same for all days) or 'day' (per-day thresholds)
+threshold_dff = 5  # 5% dff threshold for including cells in template (use None for all cells)
 threshold_corr = 0.45  # Default correlation threshold for event detection (if no surrogate thresholds available)
-min_event_distance_ms = 500  # Minimum distance between events (ms)
+min_event_distance_ms = 200  # Minimum distance between events (ms)
 min_event_distance_frames = int(min_event_distance_ms / 1000 * sampling_rate)
 prominence = 0.15  # Minimum prominence of peaks for event detection (vertical distance to contour line)
 
@@ -61,11 +61,11 @@ prominence = 0.15  # Minimum prominence of peaks for event detection (vertical d
 # Visualization parameters
 time_per_row = 200  # seconds per row in correlation trace plots (rows calculated dynamically)
 
-# Trial type selection (used in 'analyze' mode to specify which results to load and plot)
-trial_type = 'no_stim'  # Options: 'no_stim', 'whisker'
+# Trial type selection (fixed to no_stim trials only)
+trial_type = 'no_stim'
 
 # Analysis mode
-mode = 'compute'  # Options: 'compute' (run analysis and save results) or 'analyze' (load results and generate plots)
+mode = 'analyze'  # Options: 'compute' (run analysis and save results) or 'analyze' (load results and generate plots)
 
 # Parallel processing parameters
 n_jobs = 35  # Number of parallel jobs for processing mice (set to -1 to use all available cores)
@@ -203,119 +203,27 @@ def get_threshold_for_mouse_day(threshold_dict, mouse, day, default_threshold=0.
 
 
 
-def select_trials_by_type(xarray_day, trial_type):
+def select_trials_by_type(xarray_day, trial_type='no_stim'):
     """
-    Select trials based on trial type.
+    Select no-stim trials only.
 
     Parameters
     ----------
     xarray_day : xarray.DataArray
         Day-specific data with trial metadata
     trial_type : str
-        Trial type: 'no_stim', 'whisker_hit', 'whisker_miss', 'auditory_hit'
+        Trial type: only 'no_stim' is supported (parameter kept for backward compatibility)
 
     Returns
     -------
     selected_trials : xarray.DataArray
-        Filtered trials
+        Filtered trials (no-stim only)
     n_trials : int
         Number of trials selected
     """
-    if trial_type == 'no_stim':
-        # All no-stim trials (current behavior)
-        selected = xarray_day.sel(trial=xarray_day['no_stim'] == 1)
-
-    elif trial_type == 'whisker':
-        # Whisker stimulus
-        mask = (xarray_day['whisker_stim'] == 1)
-        selected = xarray_day.sel(trial=mask)
-
-    # elif trial_type == 'whisker_hit':
-    #     # Whisker stimulus + lick
-    #     mask = (xarray_day['whisker_stim'] == 1) & (xarray_day['lick_flag'] == 1)
-    #     selected = xarray_day.sel(trial=mask)
-
-    # elif trial_type == 'whisker_miss':
-    #     # Whisker stimulus + no lick
-    #     mask = (xarray_day['whisker_stim'] == 1) & (xarray_day['lick_flag'] == 0)
-    #     selected = xarray_day.sel(trial=mask)
-
-    elif trial_type == 'auditory_hit':
-        # Auditory stimulus + lick
-        mask = (xarray_day['auditory_stim'] == 1) & (xarray_day['lick_flag'] == 1)
-        selected = xarray_day.sel(trial=mask)
-
-    else:
-        raise ValueError(f"Invalid trial_type: '{trial_type}'. Must be 'no_stim', 'whisker_hit', 'whisker_miss', or 'auditory_hit'")
-
+    # Only no-stim trials are analyzed
+    selected = xarray_day.sel(trial=xarray_day['no_stim'] == 1)
     return selected, len(selected.trial)
-
-
-def blank_stimulus_period(xarray_data, trial_type, blank_window=(-0.1, 1), sampling_rate=30):
-    """
-    Blank the stimulus period in whisker/auditory trials to avoid bias in reactivation detection.
-
-    For whisker and auditory trials, the stimulus is presented at t=0 in the xarray time axis.
-    This function sets activity to zero in a window around the stimulus to prevent the stimulus
-    response from being detected as a reactivation event.
-
-    Parameters
-    ----------
-    xarray_data : xarray.DataArray
-        Trial data (n_cells, n_trials, n_timepoints)
-    trial_type : str
-        Type of trials
-    blank_window : tuple
-        (start, end) time window in seconds to blank around stimulus (default: -0.1 to 0.5s)
-    sampling_rate : float
-        Sampling rate in Hz
-
-    Returns
-    -------
-    blanked_data : xarray.DataArray
-        Data with stimulus period blanked (set to 0) if trial type requires it
-    """
-    # Only blank for stimulus trials, not for no_stim
-    if trial_type == 'no_stim':
-        return xarray_data
-
-    # Make a copy to avoid modifying original data
-    blanked_data = xarray_data.copy()
-
-    # Assuming time dimension starts at some negative value and t=0 is the stimulus
-    # We need to find which timepoint indices correspond to the blank window
-    # The xarray should have time information in coords or we assume uniform sampling
-
-    n_cells, n_trials, n_timepoints = blanked_data.shape
-
-    # Calculate frame indices for blanking window
-    # Assuming the middle of the trial is roughly t=0 or we have time coordinates
-    # For safety, let's find the center and blank around it
-    # Or better: use the time coordinate if available
-
-    if 'time' in blanked_data.coords:
-        # Use actual time coordinates
-        time_coords = blanked_data.coords['time'].values
-        blank_start_idx = np.searchsorted(time_coords, blank_window[0])
-        blank_end_idx = np.searchsorted(time_coords, blank_window[1])
-    else:
-        # Assume uniform sampling with stimulus at a known position
-        # For learning data, stimulus is typically at a fixed position
-        # Let's convert blank window to frames
-        blank_start_frames = int(blank_window[0] * sampling_rate)
-        blank_end_frames = int(blank_window[1] * sampling_rate)
-
-        # Assuming stimulus is at a specific frame (this may need adjustment based on data structure)
-        # For now, we'll blank relative to the trial start, assuming stimulus timing is consistent
-        # This might need to be adjusted based on actual data structure
-        stimulus_frame = 30  # This is an assumption - may need to be a parameter
-        blank_start_idx = max(0, stimulus_frame + blank_start_frames)
-        blank_end_idx = min(n_timepoints, stimulus_frame + blank_end_frames)
-
-    # Blank the data
-    blanked_data[:, :, blank_start_idx:blank_end_idx] = 0.0
-
-    return blanked_data
 
 
 # ============================================================================
@@ -954,60 +862,110 @@ def plot_events_per_day(frequency_by_day, mouse, save_path=None):
     return fig
 
 
-def plot_percent_time_above_per_day(results_dict, reward_group, save_path):
+def plot_percent_time_above_per_day(r_plus_results, r_minus_results, save_path):
     """
-    Plot percentage of time above threshold per day (bar chart).
+    Plot percentage of time above threshold per day (two-panel bar chart).
 
-    Similar to plot_events_per_day() but shows % time instead of events/min.
+    Creates a two-panel figure with R+ and R- side by side with shared y-axis.
+    Includes statistical comparisons across days within each reward group.
 
     Parameters
     ----------
-    results_dict : dict
-        {mouse_id: results} from analyze_mouse_reactivation()
-    reward_group : str
-        'R+' or 'R-'
+    r_plus_results : dict
+        {mouse_id: results} from analyze_mouse_reactivation() for R+ mice
+    r_minus_results : dict
+        {mouse_id: results} from analyze_mouse_reactivation() for R- mice
     save_path : str
         Path to save SVG file
     """
-    # Extract data
+    # Extract data for both groups
     all_data = []
-    for mouse, results in results_dict.items():
-        for day in days:
-            if day in results['days']:
-                day_data = results['days'][day]
-                all_data.append({
-                    'mouse': mouse,
-                    'day': day,
-                    'percent_time_above': day_data.get('percent_time_above', 0)
-                })
+    for reward_group, results_dict in [('R+', r_plus_results), ('R-', r_minus_results)]:
+        for mouse, results in results_dict.items():
+            for day in days:
+                if day in results['days']:
+                    day_data = results['days'][day]
+                    all_data.append({
+                        'mouse': mouse,
+                        'reward_group': reward_group,
+                        'day': day,
+                        'percent_time_above': day_data.get('percent_time_above', 0)
+                    })
 
     df = pd.DataFrame(all_data)
 
-    # Create plot
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # Create two-panel plot with shared y-axis
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
 
-    # Compute mean and SEM per day
-    day_means = df.groupby('day')['percent_time_above'].mean()
-    day_sems = df.groupby('day')['percent_time_above'].sem()
+    # Plot each reward group
+    for idx, (reward_group, ax) in enumerate(zip(['R+', 'R-'], axes)):
+        group_df = df[df['reward_group'] == reward_group]
 
-    # Bar plot
-    colors = [reward_palette[1]] * len(days) if reward_group == 'R+' else [reward_palette[0]] * len(days)
-    ax.bar(days_str, day_means.values, yerr=day_sems.values,
-           color=colors, alpha=0.7, capsize=5, edgecolor='black', linewidth=1.5)
+        if len(group_df) == 0:
+            ax.text(0.5, 0.5, f'No data for {reward_group}',
+                   transform=ax.transAxes, ha='center', va='center')
+            continue
 
-    # Formatting
-    ax.set_xlabel('Day', fontsize=12, fontweight='bold')
-    ax.set_ylabel('% Time Above Threshold', fontsize=12, fontweight='bold')
-    ax.set_title(f'{reward_group} Mice: Percentage of Time Above Threshold Per Day',
-                 fontsize=14, fontweight='bold')
-    ax.grid(axis='y', alpha=0.3)
+        # Compute mean and SEM per day
+        day_means = group_df.groupby('day')['percent_time_above'].mean()
+        day_sems = group_df.groupby('day')['percent_time_above'].sem()
 
-    # Add n mice annotation
-    n_mice = df['mouse'].nunique()
-    ax.text(0.02, 0.98, f'n = {n_mice} mice',
-            transform=ax.transAxes, fontsize=10,
-            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        # Bar plot
+        color = reward_palette[1] if reward_group == 'R+' else reward_palette[0]
+        ax.bar(days_str, day_means.values, yerr=day_sems.values,
+               color=color, alpha=0.7, capsize=5, edgecolor='black', linewidth=1.5)
 
+        # Formatting
+        ax.set_xlabel('Day', fontsize=12, fontweight='bold')
+        if idx == 0:
+            ax.set_ylabel('% Time Above Threshold', fontsize=12, fontweight='bold')
+        ax.set_title(f'{reward_group} Mice', fontsize=14, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add n mice annotation
+        n_mice = group_df['mouse'].nunique()
+        ax.text(0.02, 0.98, f'n = {n_mice} mice',
+                transform=ax.transAxes, fontsize=10,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+        # Statistical test across days (Friedman test for repeated measures)
+        # Only if we have data from multiple days and multiple mice
+        if len(day_means) > 1 and n_mice >= 3:
+            # Prepare data for Friedman test (mice x days matrix)
+            mice = group_df['mouse'].unique()
+            day_data_per_mouse = []
+
+            # Build matrix: each row is a mouse, each column is a day
+            for mouse in mice:
+                mouse_data = group_df[group_df['mouse'] == mouse]
+                mouse_values = []
+                has_all_days = True
+                for day in days:
+                    day_value = mouse_data[mouse_data['day'] == day]['percent_time_above']
+                    if len(day_value) > 0:
+                        mouse_values.append(day_value.values[0])
+                    else:
+                        has_all_days = False
+                        break
+
+                # Only include mice with all days present
+                if has_all_days:
+                    day_data_per_mouse.append(mouse_values)
+
+            # Run Friedman test if we have enough complete cases
+            if len(day_data_per_mouse) >= 3:
+                day_data_per_mouse = np.array(day_data_per_mouse)
+                # Each column is a day, pass as separate arguments
+                stat, p_value = friedmanchisquare(*[day_data_per_mouse[:, i] for i in range(len(days))])
+
+                # Add stats text
+                stats_text = f'Friedman test:\nχ²={stat:.2f}, p={p_value:.4f}'
+                ax.text(0.98, 0.98, stats_text,
+                       transform=ax.transAxes, fontsize=9,
+                       verticalalignment='top', horizontalalignment='right',
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
+
+    plt.suptitle('Percentage of Time Above Threshold Per Day', fontsize=16, fontweight='bold', y=1.02)
     plt.tight_layout()
     plt.savefig(save_path, format='svg', dpi=300, bbox_inches='tight')
     plt.close()
@@ -1105,6 +1063,136 @@ def compute_reactivation_frequency_per_trial(selected_trials, template, threshol
     return time_bins, event_rate, event_rate_sem, n_trials
 
 
+def plot_threshold_comparison(save_path):
+    """
+    Visualize surrogate-based thresholds for both mouse-wise and day-wise modes.
+
+    Creates a 2-page PDF:
+    - Page 1: Mouse-wise thresholds (one threshold per mouse)
+    - Page 2: Day-wise thresholds (threshold per mouse-day, showing evolution across days)
+
+    Parameters
+    ----------
+    save_path : str
+        Path to save the PDF file
+    """
+    print("\n" + "="*60)
+    print("GENERATING THRESHOLD COMPARISON PLOTS")
+    print("="*60)
+
+    # Load mouse-wise thresholds
+    mouse_csv_path = os.path.join(io.results_dir, 'reactivation_surrogates', 'surrogate_thresholds.csv')
+    day_csv_path = os.path.join(io.results_dir, 'reactivation_surrogates_per_day', 'surrogate_thresholds_per_day.csv')
+
+    has_mouse_data = os.path.exists(mouse_csv_path)
+    has_day_data = os.path.exists(day_csv_path)
+
+    if not has_mouse_data and not has_day_data:
+        print(f"  Warning: No threshold files found!")
+        print(f"    Mouse-wise: {mouse_csv_path}")
+        print(f"    Day-wise: {day_csv_path}")
+        print(f"  Run surrogate analysis first to generate threshold files.")
+        return
+
+    with PdfPages(save_path) as pdf:
+        # Page 1: Mouse-wise thresholds
+        if has_mouse_data:
+            print(f"\n  Loading mouse-wise thresholds from: {mouse_csv_path}")
+            df_mouse = pd.read_csv(mouse_csv_path)
+
+            # Get max threshold (FWER-corrected)
+            mouse_thresholds = df_mouse.groupby('mouse')['threshold_max'].first().sort_values(ascending=False)
+
+            fig, ax = plt.subplots(figsize=(12, 6))
+
+            # Bar plot
+            x_pos = np.arange(len(mouse_thresholds))
+            bars = ax.bar(x_pos, mouse_thresholds.values, color='steelblue',
+                         alpha=0.7, edgecolor='black', linewidth=1.5)
+
+            # Formatting
+            ax.set_xlabel('Mouse ID', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Correlation Threshold (FWER-corrected)', fontsize=12, fontweight='bold')
+            ax.set_title('Mouse-Wise Surrogate Thresholds\n(Single threshold per mouse computed from day 0)',
+                        fontsize=14, fontweight='bold')
+            ax.set_xticks(x_pos)
+            ax.set_xticklabels(mouse_thresholds.index, rotation=45, ha='right')
+            ax.grid(axis='y', alpha=0.3)
+
+            # Add summary statistics
+            mean_threshold = mouse_thresholds.mean()
+            std_threshold = mouse_thresholds.std()
+            stats_text = f'Mean: {mean_threshold:.4f}\nStd: {std_threshold:.4f}\nn = {len(mouse_thresholds)} mice'
+            ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+                   fontsize=10, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+            plt.tight_layout()
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close()
+            print(f"  ✓ Generated mouse-wise threshold plot (n={len(mouse_thresholds)} mice)")
+        else:
+            print(f"  Skipping mouse-wise plot: {mouse_csv_path} not found")
+
+        # Page 2: Day-wise thresholds
+        if has_day_data:
+            print(f"\n  Loading day-wise thresholds from: {day_csv_path}")
+            df_day = pd.read_csv(day_csv_path)
+
+            # Get max threshold (FWER-corrected) per mouse-day
+            df_day_max = df_day[df_day['threshold_type'] == 'max'].copy()
+
+            # Create line plot showing threshold evolution across days
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+            # Plot 1: Individual mice trajectories
+            mice = df_day_max['mouse'].unique()
+            for mouse in mice:
+                mouse_data = df_day_max[df_day_max['mouse'] == mouse].sort_values('day')
+                ax1.plot(mouse_data['day'], mouse_data['threshold'],
+                        marker='o', alpha=0.6, linewidth=1.5, label=mouse)
+
+            ax1.set_xlabel('Day', fontsize=12, fontweight='bold')
+            ax1.set_ylabel('Correlation Threshold (FWER-corrected)', fontsize=12, fontweight='bold')
+            ax1.set_title('Day-Wise Thresholds: Individual Mice', fontsize=14, fontweight='bold')
+            ax1.grid(True, alpha=0.3)
+            ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8, ncol=2)
+
+            # Plot 2: Mean ± SEM across mice
+            day_summary = df_day_max.groupby('day')['threshold'].agg(['mean', 'sem']).reset_index()
+
+            ax2.errorbar(day_summary['day'], day_summary['mean'],
+                        yerr=day_summary['sem'], marker='o', markersize=8,
+                        linewidth=2, capsize=5, capthick=2, color='steelblue',
+                        ecolor='steelblue', alpha=0.8)
+            ax2.fill_between(day_summary['day'],
+                           day_summary['mean'] - day_summary['sem'],
+                           day_summary['mean'] + day_summary['sem'],
+                           alpha=0.3, color='steelblue')
+
+            ax2.set_xlabel('Day', fontsize=12, fontweight='bold')
+            ax2.set_ylabel('Correlation Threshold (FWER-corrected)', fontsize=12, fontweight='bold')
+            ax2.set_title('Day-Wise Thresholds: Mean ± SEM', fontsize=14, fontweight='bold')
+            ax2.grid(True, alpha=0.3)
+
+            # Add n mice annotation
+            n_mice = len(mice)
+            ax2.text(0.02, 0.98, f'n = {n_mice} mice', transform=ax2.transAxes,
+                    fontsize=10, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+            plt.suptitle('Per-Day Surrogate Thresholds\n(Separate threshold for each mouse-day)',
+                        fontsize=16, fontweight='bold', y=1.02)
+            plt.tight_layout()
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close()
+            print(f"  ✓ Generated day-wise threshold plot (n={n_mice} mice, {len(day_summary)} days)")
+        else:
+            print(f"  Skipping day-wise plot: {day_csv_path} not found")
+
+    print(f"\n  ✓ Saved threshold comparison plots to: {save_path}")
+
+
 # ============================================================================
 # MAIN ANALYSIS FUNCTION
 # ============================================================================
@@ -1166,12 +1254,6 @@ def analyze_mouse_reactivation(mouse, days=[-2, -1, 0, 1, 2], verbose=True, thre
                 if verbose:
                     print(f"  Warning: No {trial_type} trials for Day {day}, skipping...")
                 continue
-
-            # Blank stimulus period if needed (to avoid stimulus bias in reactivation detection)
-            if blank_stimulus and trial_type != 'no_stim':
-                selected_trials = blank_stimulus_period(selected_trials, trial_type, blank_window, sampling_rate)
-                if verbose:
-                    print(f"  Blanked stimulus period: {blank_window[0]:.2f}s to {blank_window[1]:.2f}s")
 
             # Step 3: Prepare data and compute correlations
             n_cells, n_trials, n_timepoints = selected_trials.shape
@@ -1296,7 +1378,7 @@ def generate_mouse_pdf(results, save_dir):
         Directory to save PDF
     """
     mouse = results['mouse']
-    pdf_path = os.path.join(save_dir, f'{mouse}_reactivation_analysis_{trial_type}.pdf')
+    pdf_path = os.path.join(save_dir, f'{mouse}_reactivation_analysis.pdf')
 
     # Calculate global y-limits across all days for consistent y-axis
     all_correlations = []
@@ -3125,20 +3207,15 @@ if __name__ == "__main__":
     print(f"\nResults will be saved to: {save_dir}")
 
     # Define results file path (only relevant for analyze mode)
-    results_file = os.path.join(save_dir, f'reactivation_results_{trial_type}.pkl')
+    results_file = os.path.join(save_dir, 'reactivation_results.pkl')
 
     if mode == 'compute':
-        # ===== COMPUTE MODE: Run analysis for ALL trial types and save results =====
+        # ===== COMPUTE MODE: Run analysis for no_stim trials only =====
         print("\n" + "="*60)
-        print("COMPUTING REACTIVATION ANALYSIS FOR ALL TRIAL TYPES")
+        print("COMPUTING REACTIVATION ANALYSIS (NO_STIM TRIALS)")
         print("="*60)
 
-        # Define all trial types to analyze
-        # all_trial_types = ['no_stim', 'whisker_hit', 'whisker_miss', 'auditory_hit']
-        all_trial_types = ['no_stim', 'whisker']
-        print(f"\nTrial types to process: {all_trial_types}")
-
-        # Load surrogate thresholds if available (shared across all trial types)
+        # Load surrogate thresholds if available
         # Choose file based on threshold_mode
         if threshold_mode == 'mouse':
             surrogate_csv_path = os.path.join(io.results_dir, 'reactivation_surrogates', 'surrogate_thresholds.csv')
@@ -3166,64 +3243,36 @@ if __name__ == "__main__":
             print(f"\nSurrogate threshold file not found: {surrogate_csv_path}")
             print(f"Using default threshold: {threshold_corr}")
 
-        # Loop through all trial types
-        for current_trial_type in all_trial_types:
-            print("\n" + "="*80)
-            print(f"PROCESSING TRIAL TYPE: {current_trial_type.upper().replace('_', ' ')}")
-            print("="*80)
-            
-            # Stimulus blanking parameters (for whisker/auditory trials to avoid stimulus bias)
-            if current_trial_type in ['no_stim']:
-                blank_stimulus = True  # Whether to blank the stimulus period
-                blank_window = (0, 1.5)  # Time window around stimulus to blank (seconds)
-            else:
-                blank_stimulus = False
-                blank_window = (0, 0)  # No blanking
+        # Process R+ mice in parallel
+        print(f"\nProcessing R+ mice...")
+        r_plus_results = process_mouse_group(r_plus_mice, 'R+', save_dir, n_jobs=n_jobs, threshold_dict=threshold_dict)
 
-            # Temporarily set global trial_type variable for this iteration
-            # (process_single_mouse and related functions use the global variable)
-            globals()['trial_type'] = current_trial_type
+        # Process R- mice in parallel
+        print(f"\nProcessing R- mice...")
+        r_minus_results = process_mouse_group(r_minus_mice, 'R-', save_dir, n_jobs=n_jobs, threshold_dict=threshold_dict)
 
-            # Process R+ mice in parallel
-            print(f"\nProcessing R+ mice for {current_trial_type}...")
-            r_plus_results = process_mouse_group(r_plus_mice, 'R+', save_dir, n_jobs=n_jobs, threshold_dict=threshold_dict)
-
-            # Process R- mice in parallel
-            print(f"\nProcessing R- mice for {current_trial_type}...")
-            r_minus_results = process_mouse_group(r_minus_mice, 'R-', save_dir, n_jobs=n_jobs, threshold_dict=threshold_dict)
-
-            # Save results to file for this trial type
-            current_results_file = os.path.join(save_dir, f'reactivation_results_{current_trial_type}.pkl')
-            print("\n" + "-"*60)
-            print(f"SAVING RESULTS FOR {current_trial_type.upper()}")
-            print("-"*60)
-            results_data = {
-                'r_plus_results': r_plus_results,
-                'r_minus_results': r_minus_results,
-                'parameters': {
-                    'trial_type': current_trial_type,
-                    'threshold_corr': threshold_corr,
-                    'min_event_distance_ms': min_event_distance_ms,
-                    'prominence': prominence,
-                    'blank_stimulus': blank_stimulus,
-                    'blank_window': blank_window,
-                    'days': days
-                }
+        # Save results to file
+        results_file = os.path.join(save_dir, 'reactivation_results.pkl')
+        print("\n" + "-"*60)
+        print(f"SAVING RESULTS")
+        print("-"*60)
+        results_data = {
+            'r_plus_results': r_plus_results,
+            'r_minus_results': r_minus_results,
+            'parameters': {
+                'trial_type': 'no_stim',
+                'threshold_corr': threshold_corr,
+                'min_event_distance_ms': min_event_distance_ms,
+                'prominence': prominence,
+                'days': days
             }
-            with open(current_results_file, 'wb') as f:
-                pickle.dump(results_data, f)
-            print(f"✓ Saved results to: {current_results_file}")
-
-        print("\n" + "="*80)
-        print("COMPLETED ALL TRIAL TYPES")
-        print("="*80)
-        print("\nSaved results files:")
-        for tt in all_trial_types:
-            results_file_path = os.path.join(save_dir, f'reactivation_results_{tt}.pkl')
-            print(f"  - {results_file_path}")
+        }
+        with open(results_file, 'wb') as f:
+            pickle.dump(results_data, f)
+        print(f"✓ Saved results to: {results_file}")
 
         # Exit after computing (don't generate plots in compute mode)
-        print("\nTo generate plots, run with mode='analyze' and specify trial_type")
+        print("\nTo generate plots, run with mode='analyze'")
         import sys
         sys.exit(0)
 
@@ -3252,55 +3301,53 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Invalid mode: '{mode}'. Must be 'compute' or 'analyze'")
 
+    # Generate threshold comparison plots
+    threshold_pdf_path = os.path.join(save_dir, 'threshold_comparison.pdf')
+    plot_threshold_comparison(threshold_pdf_path)
+
     # Generate across-mice comparison figures (combining R+ and R-)
     print("\n" + "="*60)
     print("GENERATING ACROSS-MICE COMPARISON FIGURES")
     print("="*60)
 
     # Figure 1: Session-level analysis (R+ vs R-)
-    svg_path = os.path.join(save_dir, f'across_mice_session_level_comparison_{trial_type}.svg')
+    svg_path = os.path.join(save_dir, 'across_mice_session_level_comparison.svg')
     plot_session_level_across_mice(r_plus_results, r_minus_results, svg_path)
 
     # Figure 2: Block-level analysis (R+ vs R-)
-    svg_path = os.path.join(save_dir, f'across_mice_block_level_comparison_{trial_type}.svg')
+    svg_path = os.path.join(save_dir, 'across_mice_block_level_comparison.svg')
     plot_block_level_across_mice(r_plus_results, r_minus_results, svg_path)
 
     # Figure 3: Events per day (R+ vs R-)
-    svg_path = os.path.join(save_dir, f'across_mice_events_per_day_comparison_{trial_type}.svg')
+    svg_path = os.path.join(save_dir, 'across_mice_events_per_day_comparison.svg')
     plot_events_per_day_across_mice(r_plus_results, r_minus_results, svg_path)
 
     # Figure 4: Direct R+ vs R- comparison with statistics
-    svg_path = os.path.join(save_dir, f'across_mice_group_comparison_per_day_{trial_type}.svg')
+    svg_path = os.path.join(save_dir, 'across_mice_group_comparison_per_day.svg')
     plot_group_comparison_per_day(r_plus_results, r_minus_results, svg_path)
 
     # Figure 5: Reactivation frequency vs performance improvement (day 0 → day +1)
-    svg_path = os.path.join(save_dir, f'reactivation_vs_performance_delta_{trial_type}.svg')
+    svg_path = os.path.join(save_dir, 'reactivation_vs_performance_delta.svg')
     plot_reactivation_vs_performance_delta(r_plus_results, r_minus_results, svg_path)
 
     # Figure 6: Temporal reactivation dynamics across mice (5-page PDF, one per day)
-    pdf_path = os.path.join(save_dir, f'temporal_dynamics_across_mice_{trial_type}.pdf')
+    pdf_path = os.path.join(save_dir, 'temporal_dynamics_across_mice.pdf')
     plot_temporal_dynamics_across_mice(r_plus_results, r_minus_results, pdf_path)
-
-    # Figure 7: Trial type comparison for day 0 (requires all trial types to be computed)
-    plot_trial_type_comparison_day0(save_dir)
 
     # Generate time-above-threshold plots (SVG)
     print("\n" + "="*60)
     print("GENERATING TIME-ABOVE-THRESHOLD VISUALIZATIONS")
     print("="*60)
 
-    # Plot 1: Percent time above per day (separate for R+ and R-)
-    for reward_group, results_dict in [('R+', r_plus_results), ('R-', r_minus_results)]:
-        if len(results_dict) > 0:
-            svg_path = os.path.join(save_dir,
-                                    f'{reward_group}_percent_time_above_per_day_{trial_type}.svg')
-            print(f"\nGenerating {reward_group} time-above per day plot...")
-            plot_percent_time_above_per_day(results_dict, reward_group, svg_path)
+    # Plot 1: Percent time above per day (two-panel plot with R+ and R-)
+    if len(r_plus_results) > 0 or len(r_minus_results) > 0:
+        svg_path = os.path.join(save_dir, 'percent_time_above_per_day.svg')
+        print(f"\nGenerating two-panel time-above per day plot...")
+        plot_percent_time_above_per_day(r_plus_results, r_minus_results, svg_path)
 
     # Plot 2: Percent time above vs performance (combined R+ and R-)
     if len(r_plus_results) > 0 or len(r_minus_results) > 0:
-        svg_path = os.path.join(save_dir,
-                                f'percent_time_above_vs_performance_{trial_type}.svg')
+        svg_path = os.path.join(save_dir, 'percent_time_above_vs_performance.svg')
         print(f"\nGenerating time-above vs performance plot...")
         plot_percent_time_above_vs_performance(r_plus_results, r_minus_results, svg_path)
 
@@ -3342,17 +3389,17 @@ if __name__ == "__main__":
     #     print(f"  Warning: Whisker_hit results not found at {whiskerhit_results_file}")
     #     print(f"  Skipping within-day-0 performance vs whisker_hit reactivation analysis")
 
-    # Figure 10: Reactivation frequency around first whisker hit
-    print("\n" + "="*60)
-    print("FIRST WHISKER HIT ANALYSIS")
-    print("="*60)
+    # # Figure 10: Reactivation frequency around first whisker hit
+    # print("\n" + "="*60)
+    # print("FIRST WHISKER HIT ANALYSIS")
+    # print("="*60)
 
-    svg_path = os.path.join(save_dir, 'reactivation_around_first_hit_day0.svg')
-    plot_reactivation_around_first_hit(r_plus_results, r_minus_results, svg_path)
+    # svg_path = os.path.join(save_dir, 'reactivation_around_first_hit_day0.svg')
+    # plot_reactivation_around_first_hit(r_plus_results, r_minus_results, svg_path)
 
-    # Figure 11: Trial-by-trial reactivation trajectory from first hit
-    svg_path = os.path.join(save_dir, 'reactivation_trial_by_trial_from_first_hit_day0.svg')
-    plot_reactivation_trial_by_trial(r_plus_results, r_minus_results, svg_path, n_trials_after_hit=60)
+    # # Figure 11: Trial-by-trial reactivation trajectory from first hit
+    # svg_path = os.path.join(save_dir, 'reactivation_trial_by_trial_from_first_hit_day0.svg')
+    # plot_reactivation_trial_by_trial(r_plus_results, r_minus_results, svg_path, n_trials_after_hit=60)
 
     print("\n" + "="*60)
     print("ANALYSIS COMPLETE")

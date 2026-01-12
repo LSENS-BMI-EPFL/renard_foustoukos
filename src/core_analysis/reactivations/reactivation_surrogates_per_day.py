@@ -56,15 +56,15 @@ from src.core_analysis.reactivations.reactivation import (
 sampling_rate = 30  # Hz
 days = [-2, -1, 0, 1, 2]
 days_str = ['-2', '-1', '0', '+1', '+2']
-n_map_trials = 40  # Number of mapping trials for template
+n_map_trials = 40  # Number of mapping t/home/aprenard/repos/fast-learning/src/core_analysis/reactivations/reactivation_surrogates_per_day.pyrials for template
 
 # Template parameters
 threshold_dff = None  # 5% dF/F threshold for template cells (use None for all cells)
 
 # Surrogate parameters
-n_surrogates = 100000  # Number of surrogate iterations
+n_surrogates = 1000  # Number of surrogate iterations
 min_shift_frames = 60  # Minimum shift: 1 second at 30Hz
-percentile_threshold = 99  # Percentile for pointwise threshold (e.g., 90, 95, 99)
+percentile_threshold = 99.9  # Percentile for pointwise threshold (e.g., 90, 95, 99)
 np.random.seed(42)  # For reproducibility
 
 # Parallel processing
@@ -80,22 +80,22 @@ _, _, all_mice, db = io.select_sessions_from_db(
     two_p_imaging='yes'
 )
 
-# # Separate mice by reward group
-# r_plus_mice = []
-# r_minus_mice = []
-# for mouse in all_mice:
-#     try:
-#         reward_group = io.get_mouse_reward_group_from_db(io.db_path, mouse, db=db)
-#         if reward_group == 'R+':
-#             r_plus_mice.append(mouse)
-#         elif reward_group == 'R-':
-#             r_minus_mice.append(mouse)
-#     except:
-#         continue
-
-# Testing
-r_plus_mice = ['AR127']
+# Separate mice by reward group
+r_plus_mice = []
 r_minus_mice = []
+for mouse in all_mice:
+    try:
+        reward_group = io.get_mouse_reward_group_from_db(io.db_path, mouse, db=db)
+        if reward_group == 'R+':
+            r_plus_mice.append(mouse)
+        elif reward_group == 'R-':
+            r_minus_mice.append(mouse)
+    except:
+        continue
+
+# # Testing
+# r_plus_mice = ['AR127']
+# r_minus_mice = []
 
 print(f"Found {len(r_plus_mice)} R+ mice: {r_plus_mice}")
 print(f"Found {len(r_minus_mice)} R- mice: {r_minus_mice}")

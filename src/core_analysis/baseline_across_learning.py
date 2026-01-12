@@ -1636,7 +1636,7 @@ plt.figure(figsize=(4, 5))
 # Plot chance levels in grey
 sns.pointplot(data=[chance_rew, chance_nonrew], color='grey', estimator=np.nanmean, errorbar='ci', linestyles="none")
 # Plot actual accuracies
-sns.stripplot(data=[accs_rew, accs_nonrew], palette=reward_palette[::-1], alpha=0.7)
+sns.swarmplot(data=[accs_rew, accs_nonrew], palette=reward_palette[::-1], alpha=0.7)
 sns.pointplot(data=[accs_rew, accs_nonrew], palette=reward_palette[::-1], linestyle=None, estimator=np.nanmean, errorbar='ci')
 plt.xticks([0, 1], ['R+', 'R-'])
 plt.ylabel('Cross-validated accuracy')

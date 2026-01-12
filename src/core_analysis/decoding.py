@@ -53,7 +53,7 @@ from scipy.signal import correlate
 
 
 sampling_rate = 30
-win = (0, 0.180)  # from stimulus onset to 180 ms after.
+win = (0, 0.300)  # from stimulus onset to 180 ms after.
 win_length = f'{int(np.round((win[1]-win[0]) * 1000))}'  # for file naming.
 # win = (int(win[0] * sampling_rate), int(win[1] * sampling_rate))
 baseline_win = (-1, 0)
@@ -132,35 +132,6 @@ for mouse in mice:
     d = xarray.groupby('day').apply(lambda x: x.isel(trial=slice(-n_map_trials, None)))
     # Average bins.
     d = d.sel(time=slice(win[0], win[1])).mean(dim='time')
-    
-    # # Equalize the mean activity of each cell across days by shifting (additive constant).
-    # # For each cell, compute its mean activity on each day.
-    # # Use the mean across all days as the reference mean.
-    # # For each day, add a constant so that its mean matches the reference mean.
-    # cell_axis = 0  # axis for cells
-    # trial_axis = 1  # axis for trials
-    # if 'cell' in d.dims:
-    #     cell_dim = 'cell'
-    # else:
-    #     cell_dim = 'roi'
-    # trial_dim = 'trial'
-    # day_per_trial = d['day'].values
-    # unique_days = np.unique(day_per_trial)
-    # arr = d.values  # shape: (n_cells, n_trials)
-    # arr_eq = arr.copy()
-    # for icell in range(arr.shape[cell_axis]):
-    #     # For each cell, get trial indices for each day
-    #     cell_vals = arr[icell, :]
-    #     # Compute mean across all days (reference)
-    #     ref_mean = np.nanmean(cell_vals)
-    #     for day in unique_days:
-    #         day_mask = (day_per_trial == day)
-    #         if np.any(day_mask):
-    #             day_mean = np.nanmean(cell_vals[day_mask])
-    #             shift = ref_mean - day_mean
-    #             arr_eq[icell, day_mask] = cell_vals[day_mask] + shift
-    # # Replace d.values with the shifted array
-    # d.values[:] = arr_eq
 
     # Remove artefacts by setting them at 0. To avoid NaN values and
     # mismatches (that concerns a single cell).
@@ -177,10 +148,9 @@ for mouse in mice:
 
 # Decoding accuracy between reward groups.
 # ----------------------------------------
-# Train a single classifier per mouse and plot average cross-validated accuracy
-# Convoluted function because I test mean equalization without leaks to test sets.
+# Train a single classifier per mouse and plot average cross-validated accuracy.
 
-def per_mouse_cv_accuracy(vectors, label_encoder, seed=42, n_shuffles=100, return_weights=False, equalize=False, debug=False, n_jobs=20):
+def per_mouse_cv_accuracy(vectors, label_encoder, seed=42, n_shuffles=100, return_weights=False, debug=False, n_jobs=20):
     accuracies = []
     chance_accuracies = []
     weights_per_mouse = []
@@ -203,26 +173,7 @@ def per_mouse_cv_accuracy(vectors, label_encoder, seed=42, n_shuffles=100, retur
         for train_idx, test_idx in cv.split(X, y_enc):
             X_train, X_test = X[train_idx], X[test_idx]
             y_train, y_test = y_enc[train_idx], y_enc[test_idx]
-            # Equalization
-            if equalize:
-                ref_means = np.nanmean(X_train, axis=0)
-                pre_label = label_encoder.transform(['pre'])[0]
-                post_label = label_encoder.transform(['post'])[0]
-                pre_mask_train = y_train == pre_label
-                post_mask_train = y_train == post_label
-                for icell in range(X_train.shape[1]):
-                    pre_mean = np.nanmean(X_train[pre_mask_train, icell])
-                    post_mean = np.nanmean(X_train[post_mask_train, icell])
-                    X_train[pre_mask_train, icell] += ref_means[icell] - pre_mean
-                    X_train[post_mask_train, icell] += ref_means[icell] - post_mean
-                pre_mask_test = y_test == pre_label
-                post_mask_test = y_test == post_label
-                for icell in range(X_test.shape[1]):
-                    pre_mean = np.nanmean(X_test[pre_mask_test, icell])
-                    post_mean = np.nanmean(X_test[post_mask_test, icell])
-                    X_test[pre_mask_test, icell] += ref_means[icell] - pre_mean
-                    X_test[post_mask_test, icell] += ref_means[icell] - post_mean
-            # Scaling (always applied)
+            # Scaling
             scaler = StandardScaler()
             X_train_proc = scaler.fit_transform(X_train)
             X_test_proc = scaler.transform(X_test)
@@ -248,26 +199,7 @@ def per_mouse_cv_accuracy(vectors, label_encoder, seed=42, n_shuffles=100, retur
             for train_idx, test_idx in cv.split(X, y_shuff):
                 X_train, X_test = X[train_idx], X[test_idx]
                 y_train, y_test = y_shuff[train_idx], y_shuff[test_idx]
-                # Equalization
-                if equalize:
-                    ref_means = np.nanmean(X_train, axis=0)
-                    pre_label = label_encoder.transform(['pre'])[0]
-                    post_label = label_encoder.transform(['post'])[0]
-                    pre_mask_train = y_train == pre_label
-                    post_mask_train = y_train == post_label
-                    for icell in range(X_train.shape[1]):
-                        pre_mean = np.nanmean(X_train[pre_mask_train, icell])
-                        post_mean = np.nanmean(X_train[post_mask_train, icell])
-                        X_train[pre_mask_train, icell] += ref_means[icell] - pre_mean
-                        X_train[post_mask_train, icell] += ref_means[icell] - post_mean
-                    pre_mask_test = y_test == pre_label
-                    post_mask_test = y_test == post_label
-                    for icell in range(X_test.shape[1]):
-                        pre_mean = np.nanmean(X_test[pre_mask_test, icell])
-                        post_mean = np.nanmean(X_test[post_mask_test, icell])
-                        X_test[pre_mask_test, icell] += ref_means[icell] - pre_mean
-                        X_test[post_mask_test, icell] += ref_means[icell] - post_mean
-                # Scaling (always applied)
+                # Scaling
                 scaler = StandardScaler()
                 X_train_proc = scaler.fit_transform(X_train)
                 X_test_proc = scaler.transform(X_test)
@@ -298,11 +230,11 @@ def per_mouse_cv_accuracy(vectors, label_encoder, seed=42, n_shuffles=100, retur
 le = LabelEncoder()
 le.fit(['pre', 'post'])
 
-accs_rew, chance_rew, weights_rew = per_mouse_cv_accuracy(vectors_rew, le, n_shuffles=10, return_weights=True, equalize=True)
-accs_nonrew, chance_nonrew, weights_nonrew = per_mouse_cv_accuracy(vectors_nonrew, le, n_shuffles=10, return_weights=True, equalize=True)
+accs_rew, chance_rew, weights_rew = per_mouse_cv_accuracy(vectors_rew, le, n_shuffles=10, return_weights=True)
+accs_nonrew, chance_nonrew, weights_nonrew = per_mouse_cv_accuracy(vectors_nonrew, le, n_shuffles=10, return_weights=True)
 
-for w in weights_rew:
-    plt.plot(w, label='R+')
+# for w in weights_rew:
+#     plt.plot(w, label='R+')
 
 print(f"Mean accuracy R+: {np.nanmean(accs_rew):.3f} +/- {np.nanstd(accs_rew):.3f}")
 print(f"Mean accuracy R-: {np.nanmean(accs_nonrew):.3f} +/- {np.nanstd(accs_nonrew):.3f}")
@@ -312,7 +244,7 @@ plt.figure(figsize=(4, 5))
 # Plot chance levels in grey
 sns.pointplot(data=[chance_rew, chance_nonrew], color='grey', estimator=np.nanmean, errorbar='ci', linestyles="none")
 # Plot actual accuracies
-sns.stripplot(data=[accs_rew, accs_nonrew], palette=reward_palette[::-1], alpha=0.7)
+sns.swarmplot(data=[accs_rew, accs_nonrew], palette=reward_palette[::-1], alpha=0.7)
 sns.pointplot(data=[accs_rew, accs_nonrew], palette=reward_palette[::-1], linestyle=None, estimator=np.nanmean, errorbar='ci')
 plt.xticks([0, 1], ['R+', 'R-'])
 plt.ylabel('Cross-validated accuracy')

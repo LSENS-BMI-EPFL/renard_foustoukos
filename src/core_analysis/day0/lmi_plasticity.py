@@ -34,6 +34,8 @@ from src.utils.utils_plot import *
 # =============================================================================
 
 # Analysis parameters
+RUN_FITTING = False
+GENERATE_PDFS = False
 SAMPLING_RATE = 30  # Hz
 RESPONSE_WIN = (0, 0.300)  # 0-300ms response window
 RESPONSE_TYPE = 'mean'  # 'mean' or 'peak' within response window
@@ -490,7 +492,7 @@ def process_mouse(mouse_id, response_type='mean', response_win=(0, 0.300),
 def plot_distributions(results_df, output_dir):
     """
     Plot distributions of key plasticity metrics by reward group.
-    Uses ALL cells (no significance filtering).
+    Uses only cells with significant sigmoid fits (p_value < ALPHA).
 
     Parameters
     ----------
@@ -501,8 +503,10 @@ def plot_distributions(results_df, output_dir):
     """
     sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1.5)
 
+    # Filter for significant cells only
+    results_df = results_df[results_df['p_value'] < ALPHA].copy()
+
     # Convert amplitude to percentage and clip to ±200% ΔF/F
-    results_df = results_df.copy()
     results_df['amplitude_pct'] = results_df['amplitude'].clip(lower=-2, upper=2) * 100
 
     # Compute shared x-axis ranges for inflection plots
@@ -537,9 +541,10 @@ def plot_distributions(results_df, output_dir):
 
         # Inflection points - shared x-axis
         ax = axes[idx, 1]
-        sns.histplot(data=df_group, x='inflection', bins=30, ax=ax, color=color)
+        sns.histplot(data=df_group, x='inflection', binwidth=10, ax=ax, color=color,
+                     stat='proportion')
         ax.set_xlabel('Inflection Point (trial number)')
-        ax.set_ylabel('Count')
+        ax.set_ylabel('Proportion')
         ax.set_title(f'{group}: Inflection Points (n={len(df_group)})')
         ax.set_xlim(inflection_range)
 
@@ -549,13 +554,13 @@ def plot_distributions(results_df, output_dir):
         if len(df_group_with_learning) > 0:
             sns.histplot(
                 data=df_group_with_learning, x='inflection_relative',
-                color=color, ax=ax, bins=20
+                color=color, ax=ax, binwidth=10, stat='proportion'
             )
             ax.axvline(0, color='black', linestyle='--', linewidth=1.5,
                       label='Behavioral learning trial')
             ax.legend(frameon=False)
         ax.set_xlabel('Cellular inflection - Learning trial (trials)')
-        ax.set_ylabel('Count')
+        ax.set_ylabel('Proportion')
         ax.set_title(f'{group}: Inflection Timing (n={len(df_group_with_learning)})')
         ax.set_xlim(inflection_rel_range)
 
@@ -569,69 +574,53 @@ def plot_distributions(results_df, output_dir):
 
 def plot_amplitude_distributions_by_lmi(results_df, output_dir, alpha=0.05):
     """
-    Plot amplitude distributions by reward group for LMI+, Non-sig, and LMI- cells.
+    Plot amplitude distributions comparing R+ vs R- for all cells.
 
-    Creates 3-panel figure with overlaid histograms:
-    - Left panel: LMI positive cells (R+ vs R-)
-    - Middle panel: Non-significant LMI cells (R+ vs R-)
-    - Right panel: LMI negative cells (R+ vs R-)
-
-    Uses ALL cells (no significance filtering).
+    Creates single-panel figure with overlaid histograms showing amplitude
+    distributions for R+ and R- mice, using ALL cells with significant fits
+    (irrespective of LMI classification).
 
     Parameters
     ----------
     results_df : pd.DataFrame
-        Results dataframe with all cells (must have 'lmi_p' column)
+        Results dataframe with all cells
     output_dir : str
         Output directory for saving figure
     alpha : float
-        Not used (kept for backward compatibility)
+        Significance threshold for filtering cells (default: 0.05)
     """
     sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1.5)
 
-    # Use ALL cells (no p_value filtering)
-    all_cells = results_df.copy()
+    # Filter for significant cells only
+    sig_cells = results_df[results_df['p_value'] < alpha].copy()
 
-    # Convert amplitude to percentage (x100) and cap at ±150% ΔF/F (±1.5 in original units)
-    all_cells['amplitude_pct'] = all_cells['amplitude'].clip(lower=-1.5, upper=1.5) * 100
+    # Convert amplitude to percentage (x100) and cap at ±200% ΔF/F (±2.0 in original units)
+    sig_cells['amplitude_pct'] = sig_cells['amplitude'].clip(lower=-2.0, upper=2.0) * 100
 
-    # Assign LMI categories based on lmi_p percentile
-    def assign_lmi_category(lmi_p):
-        if lmi_p >= LMI_POSITIVE_THRESHOLD:
-            return 'LMI+'
-        elif lmi_p <= LMI_NEGATIVE_THRESHOLD:
-            return 'LMI-'
-        else:
-            return 'Non-sig'
+    # Split by reward group
+    rplus_cells = sig_cells[sig_cells['reward_group'] == 'R+']
+    rminus_cells = sig_cells[sig_cells['reward_group'] == 'R-']
 
-    all_cells['lmi_category'] = all_cells['lmi_p'].apply(assign_lmi_category)
+    # Create single panel figure
+    fig, ax = plt.subplots(1, 1, figsize=(8, 6), dpi=150)
 
-    # Create figure with 3 subplots
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5), dpi=150)
+    # Histogram for R- with KDE
+    sns.histplot(data=rminus_cells, x='amplitude_pct', ax=ax, color=reward_palette[0],
+                 alpha=0.4, label=f'R- (n={len(rminus_cells)})', stat='density',
+                 binwidth=10, binrange=(-200, 200), kde=True, line_kws={'linewidth': 2})
 
-    # Panel order: LMI+, Non-sig, LMI-
-    categories = ['LMI+', 'Non-sig', 'LMI-']
-    titles = ['LMI+ Cells', 'Non-sig Cells', 'LMI- Cells']
+    # Overlaid histogram for R+ with KDE
+    sns.histplot(data=rplus_cells, x='amplitude_pct', ax=ax, color=reward_palette[1],
+                 alpha=0.4, label=f'R+ (n={len(rplus_cells)})', stat='density',
+                 binwidth=10, binrange=(-200, 200), kde=True, line_kws={'linewidth': 2})
 
-    for idx, (category, title) in enumerate(zip(categories, titles)):
-        lmi_cells = all_cells[all_cells['lmi_category'] == category]
-        lmi_rplus = lmi_cells[lmi_cells['reward_group'] == 'R+']
-        lmi_rminus = lmi_cells[lmi_cells['reward_group'] == 'R-']
-
-        ax = axes[idx]
-        # Histogram for R- with KDE
-        sns.histplot(data=lmi_rminus, x='amplitude_pct', ax=ax, color=reward_palette[0],
-                     alpha=0.4, label=f'R- (n={len(lmi_rminus)})', stat='density',
-                     binwidth=10, binrange=(-150, 150), kde=True, line_kws={'linewidth': 2})
-        # Overlaid histogram for R+ with KDE
-        sns.histplot(data=lmi_rplus, x='amplitude_pct', ax=ax, color=reward_palette[1],
-                     alpha=0.4, label=f'R+ (n={len(lmi_rplus)})', stat='density',
-                     binwidth=10, binrange=(-150, 150), kde=True, line_kws={'linewidth': 2})
-        ax.set_xlabel('Amplitude (%ΔF/F)', fontsize=12)
-        ax.set_ylabel('Density', fontsize=12)
-        ax.set_xlim([-150, 150])
-        ax.set_title(f'{title} (n={len(lmi_cells)})')
-        ax.legend(frameon=False)
+    ax.set_xlabel('Amplitude (%ΔF/F)', fontsize=12)
+    ax.set_ylabel('Density', fontsize=12)
+    ax.set_xlim([-200, 200])
+    ax.set_title(f'Amplitude Distribution by Reward Group\n(All cells with significant fits, n={len(sig_cells)})',
+                 fontsize=14, fontweight='bold')
+    ax.axvline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
+    ax.legend(frameon=False, title='Reward Group')
 
     plt.tight_layout()
     sns.despine()
@@ -641,17 +630,17 @@ def plot_amplitude_distributions_by_lmi(results_df, output_dir, alpha=0.05):
     print("  ✓ Amplitude distribution plots saved")
 
 
-def plot_lmi_groups_amplitude_barplot(results_df, output_dir):
+def plot_lmi_groups_amplitude_barplot_general(results_df, output_dir, stat_level='mice',
+                                               amplitude_filter='all', filename_suffix=''):
     """
-    Create bar plot comparing amplitude across LMI groups for R+ and R- mice.
+    Create bar plot comparing amplitude across LMI groups for R+ and R- groups.
 
     Two panels (R+ and R-), each with three bars showing average amplitude for:
     - LMI positive cells (lmi_p >= 0.975)
     - Non-significant cells (0.025 < lmi_p < 0.975)
     - LMI negative cells (lmi_p <= 0.025)
 
-    Averages are computed per mouse first, then aggregated across mice.
-    Includes statistical testing and significance markers.
+    Uses ALL cells (no significance filtering).
 
     Parameters
     ----------
@@ -659,8 +648,34 @@ def plot_lmi_groups_amplitude_barplot(results_df, output_dir):
         Results dataframe with all cells
     output_dir : str
         Output directory for saving figure
+    stat_level : str
+        'mice' = aggregate per mouse then across mice (default)
+        'cells' = compute statistics directly over cells
+    amplitude_filter : str
+        'all' = all cells (default)
+        'positive' = only cells with amplitude > 0
+        'negative' = only cells with amplitude < 0
+    filename_suffix : str
+        Suffix to add to filename (default: '')
     """
-    print("\n  Computing LMI group amplitude comparison...")
+    print(f"\n  Computing LMI group amplitude comparison ({stat_level} level, {amplitude_filter} amplitude)...")
+
+    # Use ALL cells (no significance filtering)
+    results_df = results_df.copy()
+
+    # Filter by amplitude sign if requested
+    if amplitude_filter == 'positive':
+        results_df = results_df[results_df['amplitude'] > 0]
+        filter_label = 'positive amplitude only'
+    elif amplitude_filter == 'negative':
+        results_df = results_df[results_df['amplitude'] < 0]
+        filter_label = 'negative amplitude only'
+    else:
+        filter_label = 'all cells'
+
+    if len(results_df) == 0:
+        print(f"  No cells found with {amplitude_filter} amplitude. Skipping.")
+        return
 
     # Define LMI categories
     def assign_lmi_category(lmi_p):
@@ -671,12 +686,19 @@ def plot_lmi_groups_amplitude_barplot(results_df, output_dir):
         else:
             return 'Non-sig'
 
-    results_df = results_df.copy()
     results_df['lmi_category'] = results_df['lmi_p'].apply(assign_lmi_category)
 
-    # Aggregate per mouse first
-    mouse_averages = results_df.groupby(['mouse_id', 'reward_group', 'lmi_category'])['amplitude'].mean().reset_index()
-    mouse_averages.columns = ['mouse_id', 'reward_group', 'lmi_category', 'mean_amplitude']
+    # Prepare data based on stat_level
+    if stat_level == 'mice':
+        # Aggregate per mouse first
+        plot_data = results_df.groupby(['mouse_id', 'reward_group', 'lmi_category'])['amplitude'].mean().reset_index()
+        plot_data.columns = ['mouse_id', 'reward_group', 'lmi_category', 'mean_amplitude']
+        stat_label = 'Stats over mice'
+    else:  # stat_level == 'cells'
+        # Use cells directly
+        plot_data = results_df[['reward_group', 'lmi_category', 'amplitude']].copy()
+        plot_data.columns = ['reward_group', 'lmi_category', 'mean_amplitude']
+        stat_label = 'Stats over cells'
 
     # Create figure
     sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1.3)
@@ -697,7 +719,7 @@ def plot_lmi_groups_amplitude_barplot(results_df, output_dir):
         ax = axes[idx]
 
         # Filter data for this reward group
-        data = mouse_averages[mouse_averages['reward_group'] == reward_group]
+        data = plot_data[plot_data['reward_group'] == reward_group]
 
         # Ensure all categories are present
         data = data[data['lmi_category'].isin(category_order)]
@@ -707,9 +729,12 @@ def plot_lmi_groups_amplitude_barplot(results_df, output_dir):
                    order=category_order, palette=lmi_colors,
                    errorbar='ci', ax=ax, alpha=0.7, edgecolor='black', linewidth=1.5)
 
-        # Add individual mouse points
-        sns.stripplot(data=data, x='lmi_category', y='mean_amplitude',
-                     order=category_order, color='black', size=4, alpha=0.4, ax=ax)
+        # Add individual points
+        if stat_level == 'mice':
+            # Show individual mouse points
+            sns.stripplot(data=data, x='lmi_category', y='mean_amplitude',
+                         order=category_order, color='black', size=4, alpha=0.4, ax=ax)
+        # For cells, don't plot individual points (too many)
 
         # Statistical testing
         # Prepare data for each category
@@ -731,8 +756,33 @@ def plot_lmi_groups_amplitude_barplot(results_df, output_dir):
             # Bonferroni correction
             alpha_corrected = 0.05 / len(comparisons)
 
-            y_max = data['mean_amplitude'].max()
-            y_range = data['mean_amplitude'].max() - data['mean_amplitude'].min()
+            # Compute y_max and y_min based on actual bar heights (mean ± error), not raw data
+            # This prevents outliers from making the y-axis too large
+            bar_heights_max = []
+            bar_heights_min = []
+            for cat in category_order:
+                cat_values = data[data['lmi_category'] == cat]['mean_amplitude'].values
+                if len(cat_values) > 0:
+                    cat_mean = np.mean(cat_values)
+                    cat_sem = np.std(cat_values) / np.sqrt(len(cat_values))
+                    # Use mean ± 1.96*SEM (approximate 95% CI)
+                    bar_heights_max.append(cat_mean + 1.96 * cat_sem)
+                    bar_heights_min.append(cat_mean - 1.96 * cat_sem)
+
+            if len(bar_heights_max) > 0:
+                y_max = max(bar_heights_max)
+                y_min = min(bar_heights_min)
+                # Ensure y_min doesn't go below 0 if all bars are positive
+                # or y_max doesn't go above 0 if all bars are negative
+                if y_max > 0 and y_min > 0:
+                    y_min = 0
+                elif y_max < 0 and y_min < 0:
+                    y_max = 0
+                y_range = y_max - y_min
+            else:
+                y_max = data['mean_amplitude'].max()
+                y_min = data['mean_amplitude'].min()
+                y_range = y_max - y_min
 
             for comp_idx, (cat1, cat2, data1, data2, x1, x2) in enumerate(comparisons):
                 if len(data1) > 0 and len(data2) > 0:
@@ -754,27 +804,81 @@ def plot_lmi_groups_amplitude_barplot(results_df, output_dir):
                         ax.text((x1 + x2) / 2, y + y_range*0.025, stars,
                                ha='center', va='bottom', fontsize=14, fontweight='bold')
 
+            # Set y-axis limits based on bar heights with margin for brackets
+            # This prevents outliers from making the plot too large
+            y_upper = y_max + y_range * 0.30  # 30% margin above for brackets and padding
+            y_lower = y_min - abs(y_range) * 0.05  # 5% margin below
+            ax.set_ylim(y_lower, y_upper)
+
         # Styling
         ax.set_xlabel('LMI Category', fontsize=12)
         ax.set_ylabel('Amplitude (ΔF/F)', fontsize=12)
-        ax.set_title(f'{reward_group} Mice', fontsize=14, fontweight='bold')
+        ax.set_title(f'{reward_group} {"Mice" if stat_level == "mice" else "Cells"}',
+                    fontsize=14, fontweight='bold')
 
         # Add sample sizes
         for cat_idx, cat in enumerate(category_order):
-            n = len(data[data['lmi_category'] == cat])
-            n_mice = data[data['lmi_category'] == cat]['mouse_id'].nunique()
-            ax.text(cat_idx, -0.02, f'n={n}\n({n_mice} mice)',
-                   ha='center', va='top', fontsize=9, transform=ax.get_xaxis_transform())
+            cat_data = data[data['lmi_category'] == cat]
+            if stat_level == 'mice':
+                n = len(cat_data)
+                n_mice = cat_data['mouse_id'].nunique() if 'mouse_id' in cat_data.columns else n
+                ax.text(cat_idx, -0.02, f'n={n} mice',
+                       ha='center', va='top', fontsize=9, transform=ax.get_xaxis_transform())
+            else:
+                n = len(cat_data)
+                ax.text(cat_idx, -0.02, f'n={n} cells',
+                       ha='center', va='top', fontsize=9, transform=ax.get_xaxis_transform())
+
+    # Add overall title
+    fig.suptitle(f'LMI Groups Amplitude Comparison\n{stat_label}, {filter_label}',
+                fontsize=16, fontweight='bold', y=1.02)
 
     plt.tight_layout()
     sns.despine()
 
     # Save figure
-    save_path = os.path.join(output_dir, 'lmi_groups_amplitude_comparison.svg')
+    filename = f'lmi_groups_amplitude_comparison{filename_suffix}.svg'
+    save_path = os.path.join(output_dir, filename)
     plt.savefig(save_path, format='svg', dpi=150, bbox_inches='tight')
     plt.close()
 
     print(f"  ✓ LMI groups amplitude comparison saved to: {save_path}")
+
+
+def plot_lmi_groups_amplitude_barplot(results_df, output_dir):
+    """
+    Wrapper function that calls the general version with default parameters
+    and generates all 6 versions of the plot.
+    """
+    # 1. All cells, stats over mice
+    plot_lmi_groups_amplitude_barplot_general(results_df, output_dir,
+                                              stat_level='mice', amplitude_filter='all',
+                                              filename_suffix='')
+
+    # 2. All cells, stats over cells
+    plot_lmi_groups_amplitude_barplot_general(results_df, output_dir,
+                                              stat_level='cells', amplitude_filter='all',
+                                              filename_suffix='_stats_cells')
+
+    # 3. Positive amplitude only, stats over mice
+    plot_lmi_groups_amplitude_barplot_general(results_df, output_dir,
+                                              stat_level='mice', amplitude_filter='positive',
+                                              filename_suffix='_positive_mice')
+
+    # 4. Positive amplitude only, stats over cells
+    plot_lmi_groups_amplitude_barplot_general(results_df, output_dir,
+                                              stat_level='cells', amplitude_filter='positive',
+                                              filename_suffix='_positive_cells')
+
+    # 5. Negative amplitude only, stats over mice
+    plot_lmi_groups_amplitude_barplot_general(results_df, output_dir,
+                                              stat_level='mice', amplitude_filter='negative',
+                                              filename_suffix='_negative_mice')
+
+    # 6. Negative amplitude only, stats over cells
+    plot_lmi_groups_amplitude_barplot_general(results_df, output_dir,
+                                              stat_level='cells', amplitude_filter='negative',
+                                              filename_suffix='_negative_cells')
 
 
 def plot_lmi_groups_amplitude_histograms(results_df, output_dir):
@@ -783,6 +887,8 @@ def plot_lmi_groups_amplitude_histograms(results_df, output_dir):
 
     Two panels (R+ and R-), each with three overlaid histograms showing
     amplitude distributions for LMI+, Non-sig, and LMI- cells.
+
+    Uses ALL cells (no significance filtering).
 
     Parameters
     ----------
@@ -793,6 +899,9 @@ def plot_lmi_groups_amplitude_histograms(results_df, output_dir):
     """
     print("\n  Computing LMI groups amplitude histograms...")
 
+    # Use ALL cells (no significance filtering)
+    results_df = results_df.copy()
+
     # Define LMI categories
     def assign_lmi_category(lmi_p):
         if lmi_p >= LMI_POSITIVE_THRESHOLD:
@@ -802,7 +911,6 @@ def plot_lmi_groups_amplitude_histograms(results_df, output_dir):
         else:
             return 'Non-sig'
 
-    results_df = results_df.copy()
     results_df['lmi_category'] = results_df['lmi_p'].apply(assign_lmi_category)
 
     # Convert amplitude to percentage (x100) and cap at ±150% ΔF/F (±1.5 in original units)
@@ -861,6 +969,120 @@ def plot_lmi_groups_amplitude_histograms(results_df, output_dir):
     plt.close()
 
     print(f"  ✓ LMI groups amplitude histograms saved to: {save_path}")
+
+
+def plot_amplitude_sign_across_reward_groups(results_df, output_dir):
+    """
+    Compare average amplitude for positive vs negative amplitude cells across reward groups.
+
+    Creates a bar plot showing the average amplitude (in % ΔF/F) for cells with
+    positive and negative amplitude, comparing R+ and R- mice. Uses ALL cells with
+    significant fits, irrespective of LMI classification.
+
+    Parameters
+    ----------
+    results_df : pd.DataFrame
+        Results dataframe with all cells (must have 'amplitude' and 'reward_group' columns)
+    output_dir : str
+        Output directory for saving figure
+    """
+    print("\n  Computing average amplitude across reward groups...")
+
+    # Filter for significant cells only
+    # sig_cells = results_df[results_df['p_value'] < ALPHA].copy()
+    sig_cells = results_df.copy()
+
+    # Classify cells by amplitude sign
+    sig_cells['amplitude_sign'] = sig_cells['amplitude'].apply(
+        lambda x: 'Positive' if x > 0 else 'Negative'
+    )
+
+    # Compute average amplitude per mouse first (for each sign category)
+    mouse_averages = []
+    for mouse_id in sig_cells['mouse_id'].unique():
+        mouse_data = sig_cells[sig_cells['mouse_id'] == mouse_id]
+        reward_group = mouse_data['reward_group'].iloc[0]
+
+        # Positive amplitude cells
+        pos_cells = mouse_data[mouse_data['amplitude_sign'] == 'Positive']
+        if len(pos_cells) > 0:
+            mouse_averages.append({
+                'mouse_id': mouse_id,
+                'reward_group': reward_group,
+                'amplitude_sign': 'Positive',
+                'mean_amplitude': pos_cells['amplitude'].mean() * 100,  # Convert to %
+                'n_cells': len(pos_cells)
+            })
+
+        # Negative amplitude cells
+        neg_cells = mouse_data[mouse_data['amplitude_sign'] == 'Negative']
+        if len(neg_cells) > 0:
+            mouse_averages.append({
+                'mouse_id': mouse_id,
+                'reward_group': reward_group,
+                'amplitude_sign': 'Negative',
+                'mean_amplitude': neg_cells['amplitude'].mean() * 100,  # Convert to %
+                'n_cells': len(neg_cells)
+            })
+
+    avg_df = pd.DataFrame(mouse_averages)
+
+    # Create figure
+    sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1.3)
+    fig, ax = plt.subplots(1, 1, figsize=(8, 6), dpi=150)
+
+    # Plot grouped bar plot - using reward_palette
+    x_positions = np.array([0, 1])  # Positive, Negative
+    width = 0.35
+    amplitude_signs = ['Positive', 'Negative']
+
+    for idx, reward in enumerate(['R-', 'R+']):
+        reward_data = avg_df[avg_df['reward_group'] == reward]
+
+        means = []
+        sems = []
+        for sign in amplitude_signs:
+            sign_data = reward_data[reward_data['amplitude_sign'] == sign]['mean_amplitude']
+            means.append(sign_data.mean() if len(sign_data) > 0 else 0)
+            sems.append(sign_data.sem() if len(sign_data) > 0 else 0)
+
+        offset = width * (idx - 0.5)
+        ax.bar(x_positions + offset, means, width, label=reward,
+               color=reward_palette[idx], yerr=sems, capsize=5, alpha=0.8)
+
+    ax.set_ylabel('Average Amplitude (% ΔF/F)', fontsize=12)
+    ax.set_xlabel('Amplitude Sign', fontsize=12)
+    ax.set_title('Average Amplitude Across Reward Groups\n(All cells with significant fits)',
+                 fontsize=14, fontweight='bold')
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(amplitude_signs)
+    ax.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.5)
+    ax.legend(frameon=False, title='Reward Group')
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+
+    plt.tight_layout()
+    sns.despine()
+
+    # Save figure
+    save_path = os.path.join(output_dir, 'all_cells_amplitude_across_reward_groups.svg')
+    plt.savefig(save_path, format='svg', dpi=150, bbox_inches='tight')
+    plt.close()
+
+    print(f"  ✓ Average amplitude comparison saved to: {save_path}")
+
+    # Print summary statistics
+    print("\n  Summary statistics (average amplitude in % ΔF/F):")
+    for reward in ['R+', 'R-']:
+        for sign in amplitude_signs:
+            data = avg_df[(avg_df['reward_group'] == reward) &
+                         (avg_df['amplitude_sign'] == sign)]
+            if len(data) > 0:
+                mean_amp = data['mean_amplitude'].mean()
+                sem_amp = data['mean_amplitude'].sem()
+                n_mice = len(data)
+                total_cells = data['n_cells'].sum()
+                print(f"    {reward} {sign}: {mean_amp:.2f} ± {sem_amp:.2f} % ΔF/F "
+                      f"(n={n_mice} mice, {total_cells} cells)")
 
 
 def plot_cell_psth_split_by_inflection(ax, mouse_id, roi, inflection_trial, reward_group='R+'):
@@ -1046,7 +1268,7 @@ def plot_5day_mapping_psth(axes, mouse_id, roi):
 
 
 
-def create_cell_pdf_report(results_df, output_dir, pdf_name, n_cells=50):
+def create_cell_pdf_report(results_df, output_dir, pdf_name, n_cells=50, sort_by='lmi'):
     """
     Create PDF report with individual cell plots showing raw data and sigmoid fits.
 
@@ -1060,12 +1282,15 @@ def create_cell_pdf_report(results_df, output_dir, pdf_name, n_cells=50):
         Name of PDF file to create
     n_cells : int
         Number of top cells to include in report (default: 50)
+    sort_by : str
+        Column name to sort by (default: 'lmi'). Use 'combined_score' for
+        quality-based sorting.
     """
-    print(f"\n  Generating {pdf_name} for top {n_cells} cells (sorted by LMI)...")
+    print(f"\n  Generating {pdf_name} for top {n_cells} cells (sorted by {sort_by})...")
 
-    # Filter for significant cells and sort by LMI value
+    # Filter for significant cells and sort by specified column
     results_significant = results_df[results_df['p_value'] < ALPHA]
-    results_sorted = results_significant.sort_values('lmi', ascending=False).head(n_cells)
+    results_sorted = results_significant.sort_values(sort_by, ascending=False).head(n_cells)
 
     # Load behavior table for learning curves
     behavior_path = io.adjust_path_to_host(
@@ -1189,85 +1414,126 @@ Max: {row['max_val']*100:.2f}
 # MAIN EXECUTION
 # =============================================================================
 
-def main():
+def main(run_fitting=RUN_FITTING, generate_pdfs=GENERATE_PDFS):
     """
     Main execution function.
+
+    Parameters
+    ----------
+    run_fitting : bool, optional
+        If True, run sigmoid fitting and amplitude computation (default: True).
+        If False, load existing results from CSV files.
+    generate_pdfs : bool, optional
+        If True, generate single-cell PDF reports (default: True).
+        If False, skip PDF generation.
     """
     print("="*70)
     print("SINGLE-CELL PLASTICITY ANALYSIS - DAY 0")
     print("="*70)
 
-    # Load mice list
-    _, _, mice, db = io.select_sessions_from_db(
-        io.db_path, io.nwb_dir, two_p_imaging='yes'
-    )
+    if run_fitting:
+        print("\nMode: Running sigmoid fitting and amplitude computation")
 
-    print(f"\nProcessing {len(mice)} mice in parallel using {N_CORES} cores...")
-
-    # Process all mice in parallel
-    all_results = Parallel(n_jobs=N_CORES, verbose=10)(
-        delayed(process_mouse)(
-            mouse_id,
-            response_type=RESPONSE_TYPE,
-            response_win=RESPONSE_WIN,
-            min_trials=MIN_TRIALS,
-            amplitude_type=AMPLITUDE_TYPE
+        # Load mice list
+        _, _, mice, db = io.select_sessions_from_db(
+            io.db_path, io.nwb_dir, two_p_imaging='yes'
         )
-        for mouse_id in mice
-    )
 
-    # Filter out None results and empty dataframes
-    all_results = [r for r in all_results if r is not None and len(r) > 0]
+        print(f"\nProcessing {len(mice)} mice in parallel using {N_CORES} cores...")
 
-    # Combine results
-    results_df = pd.concat(all_results, ignore_index=True)
+        # Process all mice in parallel
+        all_results = Parallel(n_jobs=N_CORES, verbose=10)(
+            delayed(process_mouse)(
+                mouse_id,
+                response_type=RESPONSE_TYPE,
+                response_win=RESPONSE_WIN,
+                min_trials=MIN_TRIALS,
+                amplitude_type=AMPLITUDE_TYPE
+            )
+            for mouse_id in mice
+        )
 
-    # Add LMI information
-    lmi_df = pd.read_csv(os.path.join(io.processed_dir, 'lmi_results.csv'))
-    results_df = results_df.merge(
-        lmi_df[['mouse_id', 'roi', 'lmi', 'lmi_p']],
-        on=['mouse_id', 'roi'],
-        how='inner'
-    )
+        # Filter out None results and empty dataframes
+        all_results = [r for r in all_results if r is not None and len(r) > 0]
 
-    print(f"\nTotal cells before LMI filtering: {len(results_df)}")
+        # Combine results
+        results_df = pd.concat(all_results, ignore_index=True)
 
-    # Filter for LMI-significant cells only
-    lmi_positive = results_df[results_df['lmi_p'] >= LMI_POSITIVE_THRESHOLD].copy()
-    lmi_negative = results_df[results_df['lmi_p'] <= LMI_NEGATIVE_THRESHOLD].copy()
+        # Add LMI information
+        lmi_df = pd.read_csv(os.path.join(io.processed_dir, 'lmi_results.csv'))
+        results_df = results_df.merge(
+            lmi_df[['mouse_id', 'roi', 'lmi', 'lmi_p']],
+            on=['mouse_id', 'roi'],
+            how='inner'
+        )
 
-    print(f"LMI+ cells (p >= {LMI_POSITIVE_THRESHOLD}): {len(lmi_positive)}")
-    print(f"LMI- cells (p <= {LMI_NEGATIVE_THRESHOLD}): {len(lmi_negative)}")
+        print(f"\nTotal cells before LMI filtering: {len(results_df)}")
 
-    # Add LMI sign column
-    lmi_positive['lmi_sign'] = 'Positive'
-    lmi_negative['lmi_sign'] = 'Negative'
+        # Filter for LMI-significant cells only
+        lmi_positive = results_df[results_df['lmi_p'] >= LMI_POSITIVE_THRESHOLD].copy()
+        lmi_negative = results_df[results_df['lmi_p'] <= LMI_NEGATIVE_THRESHOLD].copy()
 
-    # Combine for saving
-    results_lmi = pd.concat([lmi_positive, lmi_negative], ignore_index=True)
+        print(f"LMI+ cells (p >= {LMI_POSITIVE_THRESHOLD}): {len(lmi_positive)}")
+        print(f"LMI- cells (p <= {LMI_NEGATIVE_THRESHOLD}): {len(lmi_negative)}")
 
-    # Load and merge behavioral learning trial data
-    learning_path = io.adjust_path_to_host(
-        r'/mnt/lsens-analysis/Anthony_Renard/data_processed/behavior/'
-        r'behavior_imagingmice_table_5days_cut_with_learning_curves.csv'
-    )
-    learning_df = pd.read_csv(learning_path)
-    learning_df = learning_df[['mouse_id', 'learning_trial']].dropna(subset=['learning_trial']).drop_duplicates()
+        # Add LMI sign column
+        lmi_positive['lmi_sign'] = 'Positive'
+        lmi_negative['lmi_sign'] = 'Negative'
 
-    # Merge learning_trial into ALL cells (for distribution plots)
-    results_df = results_df.merge(learning_df, on='mouse_id', how='left')
-    results_df['inflection_relative'] = results_df['inflection'] - results_df['learning_trial']
+        # Combine for saving
+        results_lmi = pd.concat([lmi_positive, lmi_negative], ignore_index=True)
 
-    # Merge learning_trial into LMI-filtered results
-    results_lmi = results_lmi.merge(learning_df, on='mouse_id', how='left')
+        # Load and merge behavioral learning trial data
+        learning_path = io.adjust_path_to_host(
+            r'/mnt/lsens-analysis/Anthony_Renard/data_processed/behavior/'
+            r'behavior_imagingmice_table_5days_cut_with_learning_curves.csv'
+        )
+        learning_df = pd.read_csv(learning_path)
+        learning_df = learning_df[['mouse_id', 'learning_trial']].dropna(subset=['learning_trial']).drop_duplicates()
 
-    # Compute inflection relative to learning trial
-    results_lmi['inflection_relative'] = results_lmi['inflection'] - results_lmi['learning_trial']
+        # Merge learning_trial into ALL cells (for distribution plots)
+        results_df = results_df.merge(learning_df, on='mouse_id', how='left')
+        results_df['inflection_relative'] = results_df['inflection'] - results_df['learning_trial']
 
-    # Save results
-    csv_path = os.path.join(OUTPUT_DIR, 'plasticity_results_lmi_cells.csv')
-    results_lmi.to_csv(csv_path, index=False)
-    print(f"\nSaved LMI-filtered results to {csv_path}")
+        # Merge learning_trial into LMI-filtered results
+        results_lmi = results_lmi.merge(learning_df, on='mouse_id', how='left')
+
+        # Compute inflection relative to learning trial
+        results_lmi['inflection_relative'] = results_lmi['inflection'] - results_lmi['learning_trial']
+
+        # Save results
+        csv_path_all = os.path.join(OUTPUT_DIR, 'plasticity_results_all_cells.csv')
+        results_df.to_csv(csv_path_all, index=False)
+        print(f"\nSaved all cells results to {csv_path_all}")
+
+        csv_path_lmi = os.path.join(OUTPUT_DIR, 'plasticity_results_lmi_cells.csv')
+        results_lmi.to_csv(csv_path_lmi, index=False)
+        print(f"Saved LMI-filtered results to {csv_path_lmi}")
+
+    else:
+        print("\nMode: Loading existing results from CSV files")
+
+        # Load existing results
+        csv_path_all = os.path.join(OUTPUT_DIR, 'plasticity_results_all_cells.csv')
+        csv_path_lmi = os.path.join(OUTPUT_DIR, 'plasticity_results_lmi_cells.csv')
+
+        if not os.path.exists(csv_path_all) or not os.path.exists(csv_path_lmi):
+            raise FileNotFoundError(
+                f"Results files not found. Please run with run_fitting=True first.\n"
+                f"Expected files:\n  {csv_path_all}\n  {csv_path_lmi}"
+            )
+
+        results_df = pd.read_csv(csv_path_all)
+        results_lmi = pd.read_csv(csv_path_lmi)
+
+        print(f"\nLoaded all cells results from {csv_path_all}")
+        print(f"Loaded LMI-filtered results from {csv_path_lmi}")
+        print(f"Total cells: {len(results_df)}")
+        print(f"LMI-filtered cells: {len(results_lmi)}")
+
+    # Extract LMI+ and LMI- subsets from results_lmi for summary statistics
+    lmi_positive = results_lmi[results_lmi['lmi_sign'] == 'Positive']
+    lmi_negative = results_lmi[results_lmi['lmi_sign'] == 'Negative']
 
     # Quantify proportions
     print("\n" + "="*70)
@@ -1344,50 +1610,86 @@ def main():
     # Plot LMI groups amplitude histograms (using ALL cells)
     plot_lmi_groups_amplitude_histograms(results_df, OUTPUT_DIR)
 
+    # Plot amplitude sign comparison across reward groups (using ALL cells)
+    plot_amplitude_sign_across_reward_groups(results_df, OUTPUT_DIR)
+
     # Generate 4 separate PDF reports
-    print("\n" + "="*70)
-    print("GENERATING PDF REPORTS (4 SEPARATE FILES)")
-    print("="*70)
+    if generate_pdfs:
+        print("\n" + "="*70)
+        print("GENERATING PDF REPORTS (4 SEPARATE FILES)")
+        print("="*70)
 
-    # R+ LMI+
-    subset = results_lmi[(results_lmi['reward_group'] == 'R+') &
-                         (results_lmi['lmi_sign'] == 'Positive')]
-    if len(subset) > 0:
-        create_cell_pdf_report(subset, OUTPUT_DIR,
-                               'plasticity_R+_LMI_positive.pdf',
-                               n_cells=min(100, len(subset)))
+        # R+ LMI+ (sorted by LMI value)
+        subset = results_lmi[(results_lmi['reward_group'] == 'R+') &
+                             (results_lmi['lmi_sign'] == 'Positive')]
+        
+        if len(subset) > 0:
+            create_cell_pdf_report(subset, OUTPUT_DIR,
+                                   'plasticity_R+_LMI_positive.pdf',
+                                   n_cells=min(100, len(subset)))
+        else:
+            print("  No R+ LMI+ cells found")
+
+        # R+ LMI+ with significant fits - sorted by combined quality score
+        subset_sig = results_lmi[(results_lmi['reward_group'] == 'R+') &
+                                 (results_lmi['lmi_sign'] == 'Positive') &
+                                 (results_lmi['p_value'] < ALPHA)].copy()
+        if len(subset_sig) > 0:
+            # Compute combined score: pseudo_r2 * absolute_amplitude
+            subset_sig['combined_score'] = (
+                subset_sig['pseudo_r2'] *
+                subset_sig['amplitude'].abs()
+            )
+
+            # Sort by combined score
+            subset_sig_sorted = subset_sig.sort_values('combined_score', ascending=False)
+
+            print(f"\n  Generating R+ LMI+ best quality report...")
+            print(f"    Combined score = pseudo_r² × |amplitude|")
+            print(f"    Top cell: pseudo_r²={subset_sig_sorted.iloc[0]['pseudo_r2']:.3f}, "
+                  f"|amplitude|={abs(subset_sig_sorted.iloc[0]['amplitude']):.3f}, "
+                  f"score={subset_sig_sorted.iloc[0]['combined_score']:.4f}")
+
+            create_cell_pdf_report(subset_sig_sorted, OUTPUT_DIR,
+                                   'plasticity_R+_LMI_positive_best_quality.pdf',
+                                   n_cells=min(100, len(subset_sig_sorted)),
+                                   sort_by='combined_score')
+        else:
+            print("  No R+ LMI+ cells with significant fits found")
+
+        # # R+ LMI-
+        # subset = results_lmi[(results_lmi['reward_group'] == 'R+') &
+        #                      (results_lmi['lmi_sign'] == 'Negative')]
+        # if len(subset) > 0:
+        #     create_cell_pdf_report(subset, OUTPUT_DIR,
+        #                            'plasticity_R+_LMI_negative.pdf',
+        #                            n_cells=min(50, len(subset)))
+        # else:
+        #     print("  No R+ LMI- cells found")
+
+        # # R- LMI+
+        # subset = results_lmi[(results_lmi['reward_group'] == 'R-') &
+        #                      (results_lmi['lmi_sign'] == 'Positive')]
+        # if len(subset) > 0:
+        #     create_cell_pdf_report(subset, OUTPUT_DIR,
+        #                            'plasticity_R-_LMI_positive.pdf',
+        #                            n_cells=min(50, len(subset)))
+        # else:
+        #     print("  No R- LMI+ cells found")
+
+        # # R- LMI-
+        # subset = results_lmi[(results_lmi['reward_group'] == 'R-') &
+        #                      (results_lmi['lmi_sign'] == 'Negative')]
+        # if len(subset) > 0:
+        #     create_cell_pdf_report(subset, OUTPUT_DIR,
+        #                            'plasticity_R-_LMI_negative.pdf',
+        #                            n_cells=min(50, len(subset)))
+        # else:
+        #     print("  No R- LMI- cells found")
     else:
-        print("  No R+ LMI+ cells found")
-
-    # # R+ LMI-
-    # subset = results_lmi[(results_lmi['reward_group'] == 'R+') &
-    #                      (results_lmi['lmi_sign'] == 'Negative')]
-    # if len(subset) > 0:
-    #     create_cell_pdf_report(subset, OUTPUT_DIR,
-    #                            'plasticity_R+_LMI_negative.pdf',
-    #                            n_cells=min(50, len(subset)))
-    # else:
-    #     print("  No R+ LMI- cells found")
-
-    # # R- LMI+
-    # subset = results_lmi[(results_lmi['reward_group'] == 'R-') &
-    #                      (results_lmi['lmi_sign'] == 'Positive')]
-    # if len(subset) > 0:
-    #     create_cell_pdf_report(subset, OUTPUT_DIR,
-    #                            'plasticity_R-_LMI_positive.pdf',
-    #                            n_cells=min(50, len(subset)))
-    # else:
-    #     print("  No R- LMI+ cells found")
-
-    # # R- LMI-
-    # subset = results_lmi[(results_lmi['reward_group'] == 'R-') &
-    #                      (results_lmi['lmi_sign'] == 'Negative')]
-    # if len(subset) > 0:
-    #     create_cell_pdf_report(subset, OUTPUT_DIR,
-    #                            'plasticity_R-_LMI_negative.pdf',
-    #                            n_cells=min(50, len(subset)))
-    # else:
-    #     print("  No R- LMI- cells found")
+        print("\n" + "="*70)
+        print("SKIPPING PDF REPORTS (generate_pdfs=False)")
+        print("="*70)
 
     print(f"\nAll outputs saved to: {OUTPUT_DIR}")
     print("\nAnalysis complete!")

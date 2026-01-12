@@ -55,7 +55,7 @@ n_map_trials = 40  # Number of mapping trials for template
 
 # Event detection parameters (must match reactivation.py)
 threshold_type = 'percentile'  # Options: 'percentile' or 'max' (FWER)
-threshold_mode = 'day'  # Options: 'mouse' (baseline-derived, same for all days) or 'day' (per-day thresholds)
+threshold_mode = 'mouse'  # Options: 'mouse' (baseline-derived, same for all days) or 'day' (per-day thresholds)
 threshold_dff = None  # 5% dff threshold for template cells (use None for all cells)
 threshold_corr = 0.45  # Default correlation threshold for event detection (if no surrogate thresholds available)
 min_event_distance_ms = 500

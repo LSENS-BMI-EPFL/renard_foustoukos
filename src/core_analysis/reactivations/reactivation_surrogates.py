@@ -56,11 +56,11 @@ days_str = ['-2', '-1', '0', '+1', '+2']
 n_map_trials = 40  # Number of mapping trials for template
 
 # Template parameters
-threshold_dff = None  # 5% dF/F threshold for template cells (parametrized)
+threshold_dff = 0.05  # 5% dF/F threshold for template cells (parametrized)
 
 # Surrogate parameters
-n_surrogates = 10000  # Number of surrogate iterations
-min_shift_frames = 30  # Minimum shift: 1 second at 30Hz
+n_surrogates = 100  # Number of surrogate iterations
+min_shift_frames = 60  # Minimum shift: 2 seconds at 30Hz
 percentile_threshold = 99  # Percentile for pointwise threshold (e.g., 90, 95, 99)
 np.random.seed(42)  # For reproducibility
 

@@ -69,7 +69,7 @@ select_lmi = False
 zscore = False
 projection_type = None  # 'wS2', 'wM1' or None
 n_min_proj = 5
-similarity_metric = 'spearman'
+similarity_metric = 'pearson'
 sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1)
 
 _, _, mice, db = io.select_sessions_from_db(io.db_path,
@@ -273,7 +273,7 @@ plt.savefig(os.path.join(output_dir, svg_file.replace('.svg', '.png')), format='
 
 
 # Quantification: Network Reorganization Metrics
-# -----------------------------------------------
+# ----------------------------------------------
 
 def compute_network_metrics(corr_matrices, days, n_map_trials):
     """
@@ -358,33 +358,34 @@ for metric in ['within_pre', 'within_post', 'between_pre_post', 'reorganization_
     print(f"{metric:25s}: U={stat:.1f}, p={p_value:.4f} {'***' if p_value < 0.001 else '**' if p_value < 0.01 else '*' if p_value < 0.05 else 'n.s.'}")
 
 # Visualization of metrics
-fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+fig, ax = plt.subplots(1, 1, figsize=(8, 5))
 
-# Panel 1: Within vs Between correlations
+# Combine Pre, Post, and Reorganization Index in one panel
 metrics_long = metrics_combined.melt(
     id_vars=['mouse_id', 'reward_group'],
-    value_vars=['within_pre', 'within_post', 'between_pre_post'],
-    var_name='metric', value_name='correlation'
+    value_vars=['within_pre', 'within_post', 'reorganization_index'],
+    var_name='metric', value_name='value'
 )
-sns.swarmplot(data=metrics_long, x='metric', y='correlation', hue='reward_group',
-              palette=reward_palette[::-1], dodge=True, alpha=0.5, ax=axes[0], size=4)
-sns.pointplot(data=metrics_long, x='metric', y='correlation', hue='reward_group',
-              palette=reward_palette[::-1], ax=axes[0], linestyles='none', 
+sns.swarmplot(data=metrics_long, x='metric', y='value', hue='reward_group',
+              palette=reward_palette[::-1], dodge=True, alpha=0.5, ax=ax, size=4)
+sns.pointplot(data=metrics_long, x='metric', y='value', hue='reward_group',
+              palette=reward_palette[::-1], ax=ax, linestyles='none',
               errorbar='ci', dodge=True)
-axes[0].set_xlabel('')
-axes[0].set_ylabel('Average Correlation')
-axes[0].set_title('Within vs Between Epoch Correlations')
-axes[0].legend(title='Group')
-axes[0].set_xticklabels(['Within Pre', 'Within Post', 'Between\nPre-Post'])
-axes[0].set_ylim(0, None)
+ax.set_ylim(0, .3)
+ax.set_xlabel('')
+ax.set_ylabel('Value')
+ax.set_title('Network Reorganization Metrics')
+ax.legend(title='Group')
+ax.set_xticklabels(['Within Pre', 'Within Post', 'Reorganization\nIndex'])
+ax.set_ylim(0, None)
 
-# Add p-values for panel 1
-metric_order = ['within_pre', 'within_post', 'between_pre_post']
+# Add p-values
+metric_order = ['within_pre', 'within_post', 'reorganization_index']
 for i, metric in enumerate(metric_order):
     p_val = stats_dict[metric]
-    y_max = metrics_long[metrics_long['metric'] == metric]['correlation'].max()
+    y_max = metrics_long[metrics_long['metric'] == metric]['value'].max()
     y_pos = y_max * 1.05
-    
+
     # Format p-value text
     if p_val < 0.001:
         p_text = 'p<0.001'
@@ -393,35 +394,7 @@ for i, metric in enumerate(metric_order):
     else:
         p_text = f'p={p_val:.2f}'
 
-    axes[0].text(i, y_pos*0.98, p_text, ha='center', va='bottom', fontsize=9)
-
-# Panel 2: Reorganization Index
-sns.swarmplot(data=metrics_combined, x='reward_group', y='reorganization_index', hue='reward_group',
-              order=['R+', 'R-'], palette=reward_palette[::-1], alpha=0.5, ax=axes[1], size=4)
-sns.pointplot(data=metrics_combined, x='reward_group', y='reorganization_index', hue='reward_group',
-              order=['R+', 'R-'], palette=reward_palette[::-1], ax=axes[1], linestyles='none',
-              errorbar='ci')
-axes[1].set_xlabel('Reward Group')
-axes[1].set_ylabel('Reorganization Index')
-axes[1].set_title('Network Reorganization\n(Higher = More Reorganization)')
-axes[1].legend().set_visible(False)
-axes[1].set_ylim(0, None)
-
-# Add p-value for panel 2
-p_val = stats_dict['reorganization_index']
-y_max = metrics_combined['reorganization_index'].max()
-y_pos = y_max * 1.05
-
-if p_val < 0.001:
-    p_text = 'p<0.001'
-elif p_val < 0.01:
-    p_text = f'p={p_val:.3f}'
-else:
-    p_text = f'p={p_val:.2f}'
-
-# Draw line connecting the two groups and add p-value
-x_coords = [0, 1]
-axes[1].text(0.5, y_pos * .98, p_text, ha='center', va='bottom', fontsize=9)
+    ax.text(i, y_pos*0.98, p_text, ha='center', va='bottom', fontsize=9)
 
 sns.despine()
 plt.tight_layout()

@@ -321,7 +321,6 @@ for i, session in enumerate(sessions):
 output_dir = r'/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/behavior/exemples'
 plt.savefig(os.path.join(output_dir, f'behavior_single_mouse_{mouse_id}.svg'), dpi=300)
 
-sns.plotting_context("paper")
 
 
 # ################################
@@ -708,38 +707,20 @@ plt.savefig(output_file, format='svg', dpi=300)
 
 
 
-# Performance over trials aligned to first hit.
-# ---------------------------------------------
+# Performance over trials aligned to first whisker trial.
+# -------------------------------------------------------
+import matplotlib
 
-# Remove initial segment of trials where outcome_w == 0 for each session
-# also the first whisker hit
-def remove_initial_zero_outcome_w(table):
-    def remove_initial_zeros(df):
-        first_hit_index = df[df['outcome_w'] == 1].index.min()
-        if pd.notna(first_hit_index):
-            return df.loc[first_hit_index+1:]
-        return df
-    table = table.groupby('session_id', group_keys=False).apply(remove_initial_zeros)
-    return table
-
-# Prepare data
-block_size = 1
+# Prepare data - simply filter for whisker trials on day 0
 n_trials = 120
 df = table.loc[(table.whisker_stim==1) & (table.day==0)]
-df_fh = remove_initial_zero_outcome_w(df)
-df_fh['trial_w'] = df_fh.groupby('session_id').cumcount()
-df_fh = df_fh.loc[df_fh.trial_w <= n_trials]
+df = df.loc[df.trial_w <= n_trials]
 
 # Prepare data for single trial plot
-df_single = df_fh.copy()
-df_single['trial_w'] = df_single.groupby('session_id').cumcount()
-
-# Prepare data for block average plot (using existing block_id and hr_w columns)
-df_block = df_fh[['session_id', 'reward_group', 'block_id', 'hr_w']].drop_duplicates().copy()
+df_single = df.copy()
 
 # Prepare data for learning curve plot
-df_learning = df_fh.copy()
-df_learning['trial_w'] = df_learning.groupby('session_id').cumcount() + 1
+df_learning = df.copy()
 
 # Create three-panel figure
 fig, axes = plt.subplots(1, 2, sharey=True, figsize=(12, 5))
@@ -813,7 +794,7 @@ plt.tight_layout()
 
 # Save the figure
 output_dir = io.adjust_path_to_host(r'/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/behavior')
-output_file = os.path.join(output_dir, f'performance_D0_comparison_aligned_firsthit.svg')
+output_file = os.path.join(output_dir, f'performance_D0_comparison_aligned_whisker_trial.svg')
 plt.savefig(output_file, format='svg', dpi=300)
 
 # Save all data and p-values
