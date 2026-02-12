@@ -63,12 +63,12 @@ threshold_dff = None  # 5% dF/F threshold for template cells (use None for all c
 
 # Surrogate parameters
 n_surrogates = 1000  # Number of surrogate iterations
-min_shift_frames = 60  # Minimum shift: 1 second at 30Hz
-percentile_threshold = 99.9  # Percentile for pointwise threshold (e.g., 90, 95, 99)
+min_shift_frames = 0  # Minimum shift: 1 second at 30Hz
+percentiles_to_compute = [95, 99, 99.9]  # Percentiles for pointwise thresholds (computed in one go!)
 np.random.seed(42)  # For reproducibility
 
 # Parallel processing
-n_jobs = 1
+n_jobs = 35
 
 # Visualization
 sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1)
@@ -105,7 +105,7 @@ print(f"Found {len(r_minus_mice)} R- mice: {r_minus_mice}")
 # CORE FUNCTIONS
 # =============================================================================
 
-def create_surrogate_by_circular_shift(data, min_shift_frames=30):
+def create_surrogate_by_circular_shift(data, min_shift_frames=0):
     """
     Create one surrogate by independently shifting each cell in time.
 
@@ -135,13 +135,14 @@ def create_surrogate_by_circular_shift(data, min_shift_frames=30):
     return surrogate
 
 
-def compute_surrogate_thresholds(data, template, n_surrogates=1000, min_shift=30,
-                                 percentile=95, verbose=True):
+def compute_surrogate_thresholds(data, template, n_surrogates=10000, min_shift=0,
+                                 percentiles=[95, 99, 99.9], verbose=True):
     """
-    Compute surrogate-based thresholds via circular time shifts.
+    Compute surrogate-based thresholds via circular time shifts for MULTIPLE percentiles.
 
     Generates n_surrogates time-shifted versions of the data, computes template
-    correlation for each, and extracts statistics to define thresholds.
+    correlation for each, and extracts statistics to define thresholds. Efficiently
+    computes multiple percentiles from the same set of surrogate correlations.
 
     Parameters
     ----------
@@ -153,46 +154,52 @@ def compute_surrogate_thresholds(data, template, n_surrogates=1000, min_shift=30
         Number of surrogate iterations (default: 1000)
     min_shift : int
         Minimum shift in frames (default: 30)
-    percentile : float
-        Percentile for pointwise threshold (default: 95)
+    percentiles : list of float
+        Percentiles for pointwise thresholds (default: [95, 99, 99.9])
     verbose : bool
         Print progress
 
     Returns
     -------
     results : dict
+        Dictionary keyed by percentile value, where each value is a dict with:
         {
-            'threshold_percentile_mean': float,
-            'threshold_percentile_ci': (lower, upper),
-            'threshold_max_mean': float,
-            'threshold_max_ci': (lower, upper),
-            'surrogate_percentiles': np.ndarray of percentiles,
-            'surrogate_maxs': np.ndarray of maxima,
-            'observed_percentile': float,
-            'observed_max': float,
-            'p_value_percentile': float (percentile of observed in null),
-            'p_value_max': float,
-            'percentile_value': float (the percentile used)
+            percentile_value: {
+                'threshold_percentile_mean': float,
+                'threshold_percentile_ci': (lower, upper),
+                'threshold_max_mean': float,
+                'threshold_max_ci': (lower, upper),
+                'surrogate_percentiles': np.ndarray of percentiles,
+                'surrogate_maxs': np.ndarray of maxima,
+                'observed_percentile': float,
+                'observed_max': float,
+                'p_value_percentile': float (percentile of observed in null),
+                'p_value_max': float,
+                'percentile_value': float (the percentile used)
+            }
         }
     """
     n_cells, n_frames = data.shape
 
     if verbose:
-        print(f"    Computing {n_surrogates} surrogates (percentile={percentile})...")
+        print(f"    Computing {n_surrogates} surrogates for percentiles {percentiles}...")
         print(f"    Data shape: {n_cells} cells × {n_frames} frames")
 
-    # First compute observed statistics
+    # First compute observed statistics for all percentiles
     observed_corr = compute_template_correlation(data, template)
-    observed_percentile = np.percentile(observed_corr, percentile)
+    observed_percentiles = {p: np.percentile(observed_corr, p) for p in percentiles}
     observed_max = np.max(observed_corr)
 
     if verbose:
-        print(f"    Observed: {percentile}th percentile = {observed_percentile:.4f}, max = {observed_max:.4f}")
+        for p in percentiles:
+            print(f"    Observed: {p}th percentile = {observed_percentiles[p]:.4f}")
+        print(f"    Observed max = {observed_max:.4f}")
 
-    # Generate surrogates and compute statistics
-    surrogate_percentiles = np.zeros(n_surrogates)
+    # Initialize storage for each percentile
+    surrogate_percentiles = {p: np.zeros(n_surrogates) for p in percentiles}
     surrogate_maxs = np.zeros(n_surrogates)
 
+    # Generate surrogates and compute statistics for ALL percentiles at once
     for i in range(n_surrogates):
         if verbose and (i+1) % 100 == 0:
             print(f"      Surrogate {i+1}/{n_surrogates}")
@@ -200,51 +207,66 @@ def compute_surrogate_thresholds(data, template, n_surrogates=1000, min_shift=30
         # Generate surrogate
         surrogate_data = create_surrogate_by_circular_shift(data, min_shift)
 
-        # Compute correlation with template
+        # Compute correlation with template (FAST with vectorized version!)
         surrogate_corr = compute_template_correlation(surrogate_data, template)
 
-        # Extract statistics
-        surrogate_percentiles[i] = np.percentile(surrogate_corr, percentile)
+        # Extract ALL percentiles from the same surrogate correlation
+        for p in percentiles:
+            surrogate_percentiles[p][i] = np.percentile(surrogate_corr, p)
+
+        # Max is shared across all percentiles
         surrogate_maxs[i] = np.max(surrogate_corr)
 
-    # Compute threshold means and confidence intervals
-    threshold_percentile_mean = np.mean(surrogate_percentiles)
-    threshold_percentile_ci = (np.percentile(surrogate_percentiles, 2.5),
-                                np.percentile(surrogate_percentiles, 97.5))
+    # Compute statistics separately for each percentile
+    results = {}
+    for p in percentiles:
+        # Compute threshold means and confidence intervals
+        threshold_percentile_mean = np.mean(surrogate_percentiles[p])
+        threshold_percentile_ci = (np.percentile(surrogate_percentiles[p], 2.5),
+                                    np.percentile(surrogate_percentiles[p], 97.5))
 
-    threshold_max_mean = np.mean(surrogate_maxs)
-    threshold_max_ci = (np.percentile(surrogate_maxs, 2.5), np.percentile(surrogate_maxs, 97.5))
+        threshold_max_mean = np.mean(surrogate_maxs)
+        threshold_max_ci = (np.percentile(surrogate_maxs, 2.5),
+                            np.percentile(surrogate_maxs, 97.5))
 
-    # Compute p-values: where does observed fall in surrogate distribution?
-    p_value_percentile = percentileofscore(surrogate_percentiles, observed_percentile) / 100.0
-    p_value_max = percentileofscore(surrogate_maxs, observed_max) / 100.0
+        # Compute p-values: where does observed fall in surrogate distribution?
+        p_value_percentile = percentileofscore(surrogate_percentiles[p],
+                                                observed_percentiles[p]) / 100.0
+        p_value_max = percentileofscore(surrogate_maxs, observed_max) / 100.0
+
+        if verbose:
+            print(f"    Threshold ({p}th): {threshold_percentile_mean:.4f} "
+                  f"[{threshold_percentile_ci[0]:.4f}, {threshold_percentile_ci[1]:.4f}]")
+
+        # Store results for this percentile
+        results[p] = {
+            'threshold_percentile_mean': threshold_percentile_mean,
+            'threshold_percentile_ci': threshold_percentile_ci,
+            'threshold_max_mean': threshold_max_mean,
+            'threshold_max_ci': threshold_max_ci,
+            'surrogate_percentiles': surrogate_percentiles[p],
+            'surrogate_maxs': surrogate_maxs,
+            'observed_percentile': observed_percentiles[p],
+            'observed_max': observed_max,
+            'p_value_percentile': p_value_percentile,
+            'p_value_max': p_value_max,
+            'percentile_value': p
+        }
 
     if verbose:
-        print(f"    Threshold ({percentile}th): {threshold_percentile_mean:.4f} [{threshold_percentile_ci[0]:.4f}, {threshold_percentile_ci[1]:.4f}]")
-        print(f"    Threshold (max):  {threshold_max_mean:.4f} [{threshold_max_ci[0]:.4f}, {threshold_max_ci[1]:.4f}]")
-        print(f"    P-values: {percentile}th={p_value_percentile:.3f}, max={p_value_max:.3f}")
+        print(f"    Max threshold (FWER): {threshold_max_mean:.4f} "
+              f"[{threshold_max_ci[0]:.4f}, {threshold_max_ci[1]:.4f}]")
 
-    return {
-        'threshold_percentile_mean': threshold_percentile_mean,
-        'threshold_percentile_ci': threshold_percentile_ci,
-        'threshold_max_mean': threshold_max_mean,
-        'threshold_max_ci': threshold_max_ci,
-        'surrogate_percentiles': surrogate_percentiles,
-        'surrogate_maxs': surrogate_maxs,
-        'observed_percentile': observed_percentile,
-        'observed_max': observed_max,
-        'p_value_percentile': p_value_percentile,
-        'p_value_max': p_value_max,
-        'percentile_value': percentile
-    }
+    return results
 
 
 def analyze_mouse_surrogates(mouse, days=[-2, -1, 0, 1, 2], threshold_dff=0.05,
-                             n_surrogates=1000, percentile=95, verbose=True):
+                             n_surrogates=10000, percentiles=[95, 99, 99.9], verbose=True):
     """
-    Compute surrogate thresholds for one mouse across multiple days.
+    Compute surrogate thresholds for one mouse across multiple days and percentiles.
 
-    Each day gets its own threshold computed from that day's data only.
+    Each day gets its own threshold computed from that day's data only. Multiple
+    percentiles are computed efficiently from the same set of surrogates.
 
     Parameters
     ----------
@@ -256,26 +278,28 @@ def analyze_mouse_surrogates(mouse, days=[-2, -1, 0, 1, 2], threshold_dff=0.05,
         Responsiveness threshold for template cells (default: 0.05 = 5%).
         If None, all cells are used.
     n_surrogates : int
-        Number of surrogate iterations (default: 1000)
-    percentile : float
-        Percentile for pointwise threshold (default: 95)
+        Number of surrogate iterations (default: 10000)
+    percentiles : list of float
+        Percentiles for pointwise thresholds (default: [95, 99, 99.9])
     verbose : bool
         Print progress
 
     Returns
     -------
-    results_df : pd.DataFrame
-        Threshold results for this mouse (one row per day)
+    results_dfs : dict
+        Dictionary keyed by percentile value, each containing a DataFrame with
+        threshold results for this mouse (one row per day)
     all_surrogate_data : dict
-        Detailed surrogate distributions for each day (for plotting)
+        Nested dict {percentile: {day: surrogate_results}} for plotting
     """
     if verbose:
         print(f"\n{'='*60}")
         print(f"ANALYZING MOUSE: {mouse}")
         print(f"{'='*60}")
 
-    results_list = []
-    all_surrogate_data = {}
+    # Initialize separate result lists for each percentile
+    results_lists = {p: [] for p in percentiles}
+    all_surrogate_data = {p: {} for p in percentiles}
 
     for day in days:
         try:
@@ -320,35 +344,37 @@ def analyze_mouse_surrogates(mouse, days=[-2, -1, 0, 1, 2], threshold_dff=0.05,
             if verbose:
                 print(f"    Data: {n_trials} trials × {n_timepoints} frames = {n_frames} total frames")
 
-            # Step 3: Compute surrogate thresholds
+            # Step 3: Compute surrogate thresholds for ALL percentiles at once
             surrogate_results = compute_surrogate_thresholds(
-                data, template, n_surrogates, min_shift_frames, percentile=percentile, verbose=verbose
+                data, template, n_surrogates, min_shift_frames, percentiles=percentiles, verbose=verbose
             )
 
-            # Store results (includes day column)
-            results_list.append({
-                'mouse_id': mouse,
-                'day': day,
-                'n_cells_responsive': n_cells_responsive,
-                'n_trials': n_trials,
-                'n_timepoints': n_timepoints,
-                'n_frames': n_frames,
-                'n_surrogates': n_surrogates,
-                'percentile_value': percentile,
-                'threshold_percentile_mean': surrogate_results['threshold_percentile_mean'],
-                'threshold_percentile_ci_lower': surrogate_results['threshold_percentile_ci'][0],
-                'threshold_percentile_ci_upper': surrogate_results['threshold_percentile_ci'][1],
-                'threshold_max_mean': surrogate_results['threshold_max_mean'],
-                'threshold_max_ci_lower': surrogate_results['threshold_max_ci'][0],
-                'threshold_max_ci_upper': surrogate_results['threshold_max_ci'][1],
-                'observed_percentile': surrogate_results['observed_percentile'],
-                'observed_max': surrogate_results['observed_max'],
-                'p_value_percentile': surrogate_results['p_value_percentile'],
-                'p_value_max': surrogate_results['p_value_max']
-            })
+            # Store results separately for each percentile
+            for p in percentiles:
+                p_results = surrogate_results[p]
+                results_lists[p].append({
+                    'mouse_id': mouse,
+                    'day': day,
+                    'n_cells_responsive': n_cells_responsive,
+                    'n_trials': n_trials,
+                    'n_timepoints': n_timepoints,
+                    'n_frames': n_frames,
+                    'n_surrogates': n_surrogates,
+                    'percentile_value': p,
+                    'threshold_percentile_mean': p_results['threshold_percentile_mean'],
+                    'threshold_percentile_ci_lower': p_results['threshold_percentile_ci'][0],
+                    'threshold_percentile_ci_upper': p_results['threshold_percentile_ci'][1],
+                    'threshold_max_mean': p_results['threshold_max_mean'],
+                    'threshold_max_ci_lower': p_results['threshold_max_ci'][0],
+                    'threshold_max_ci_upper': p_results['threshold_max_ci'][1],
+                    'observed_percentile': p_results['observed_percentile'],
+                    'observed_max': p_results['observed_max'],
+                    'p_value_percentile': p_results['p_value_percentile'],
+                    'p_value_max': p_results['p_value_max']
+                })
 
-            # Store detailed data for plotting
-            all_surrogate_data[day] = surrogate_results
+                # Store detailed data for plotting
+                all_surrogate_data[p][day] = p_results
 
         except Exception as e:
             if verbose:
@@ -357,28 +383,31 @@ def analyze_mouse_surrogates(mouse, days=[-2, -1, 0, 1, 2], threshold_dff=0.05,
             traceback.print_exc()
             continue
 
-    if len(results_list) == 0:
+    # Check if any data was collected
+    if all(len(results_lists[p]) == 0 for p in percentiles):
         if verbose:
             print(f"\n  No valid data for mouse {mouse}")
         return None, None
 
-    results_df = pd.DataFrame(results_list)
+    # Create DataFrames for each percentile
+    results_dfs = {p: pd.DataFrame(results_lists[p]) for p in percentiles}
 
     if verbose:
-        print(f"\n  Completed mouse {mouse}: {len(results_list)} days processed")
+        print(f"\n  Completed mouse {mouse}: {len(results_lists[percentiles[0]])} days processed")
+        print(f"  Generated results for {len(percentiles)} percentiles: {percentiles}")
 
-    return results_df, all_surrogate_data
+    return results_dfs, all_surrogate_data
 
 
-def process_single_mouse(mouse, days, threshold_dff, n_surrogates, percentile=95, verbose=False):
+def process_single_mouse(mouse, days, threshold_dff, n_surrogates, percentiles=[95, 99, 99.9], verbose=False):
     """
     Wrapper for parallel processing.
     """
-    results_df, surrogate_data = analyze_mouse_surrogates(
+    results_dfs, surrogate_data = analyze_mouse_surrogates(
         mouse, days=days, threshold_dff=threshold_dff,
-        n_surrogates=n_surrogates, percentile=percentile, verbose=verbose
+        n_surrogates=n_surrogates, percentiles=percentiles, verbose=verbose
     )
-    return (mouse, results_df, surrogate_data)
+    return (mouse, results_dfs, surrogate_data)
 
 
 # =============================================================================
@@ -625,7 +654,7 @@ if __name__ == "__main__":
     print(f"\nParameters:")
     print(f"  Responsiveness threshold: {threshold_dff*100 if threshold_dff is not None else 'None (all cells)'}% dF/F")
     print(f"  Number of surrogates: {n_surrogates}")
-    print(f"  Percentile threshold: {percentile_threshold}th")
+    print(f"  Percentile thresholds: {percentiles_to_compute} (computed simultaneously!)")
     print(f"  Minimum time shift: {min_shift_frames} frames ({min_shift_frames/sampling_rate:.1f} sec)")
     print(f"  Days: {days} (separate threshold per day)")
     print(f"  Parallel jobs: {n_jobs}")
@@ -643,90 +672,119 @@ if __name__ == "__main__":
 
     all_mice_to_process = r_plus_mice + r_minus_mice
     print(f"Processing {len(all_mice_to_process)} mice in parallel (per-day thresholds)...")
+    print(f"Computing {len(percentiles_to_compute)} percentiles from same surrogates for efficiency!")
 
     results_list = Parallel(n_jobs=n_jobs, verbose=10)(
         delayed(process_single_mouse)(mouse, days, threshold_dff, n_surrogates,
-                                     percentile=percentile_threshold, verbose=False)
+                                     percentiles=percentiles_to_compute, verbose=False)
         for mouse in all_mice_to_process
     )
 
-    # Collect results
-    all_results = []
-    all_surrogate_data = {}
+    # Collect results separately for each percentile
+    all_results = {p: [] for p in percentiles_to_compute}
+    all_surrogate_data = {p: {} for p in percentiles_to_compute}
 
-    for mouse, results_df, surrogate_data in results_list:
-        if results_df is not None:
-            all_results.append(results_df)
-            all_surrogate_data[mouse] = surrogate_data
+    for mouse, results_dfs, surrogate_data in results_list:
+        if results_dfs is not None:
+            for p in percentiles_to_compute:
+                all_results[p].append(results_dfs[p])
+                all_surrogate_data[p][mouse] = surrogate_data[p]
 
-    if len(all_results) == 0:
+    if all(len(all_results[p]) == 0 for p in percentiles_to_compute):
         print("\nERROR: No valid results collected!")
         sys.exit(1)
 
-    all_results_df = pd.concat(all_results, ignore_index=True)
-    print(f"\nCollected results: {len(all_results_df)} mouse-day combinations")
-    print(f"  {all_results_df['mouse_id'].nunique()} unique mice")
-    print(f"  {all_results_df.groupby('mouse_id')['day'].count().mean():.1f} days per mouse (average)")
+    # Create DataFrames for each percentile
+    all_results_dfs = {p: pd.concat(all_results[p], ignore_index=True) for p in percentiles_to_compute}
 
-    # Save main results CSV
-    csv_path = os.path.join(output_dir, 'surrogate_thresholds_per_day.csv')
-    all_results_df.to_csv(csv_path, index=False)
-    print(f"\nSaved thresholds to: {csv_path}")
+    # Print collection summary
+    first_percentile = percentiles_to_compute[0]
+    print(f"\nCollected results: {len(all_results_dfs[first_percentile])} mouse-day combinations")
+    print(f"  {all_results_dfs[first_percentile]['mouse_id'].nunique()} unique mice")
+    print(f"  {all_results_dfs[first_percentile].groupby('mouse_id')['day'].count().mean():.1f} days per mouse (average)")
+    print(f"  {len(percentiles_to_compute)} percentiles computed: {percentiles_to_compute}")
 
-    # Generate per-mouse PDFs
+    # Save separate CSV files for each percentile
+    print("\nSaving CSV files...")
+    for p in percentiles_to_compute:
+        # Create filename: p95 for 95%, p99 for 99%, p999 for 99.9%
+        p_str = f"p{int(p)}" if p == int(p) else f"p{int(p*10)}"
+        csv_path = os.path.join(output_dir, f'surrogate_thresholds_per_day_{p_str}.csv')
+        all_results_dfs[p].to_csv(csv_path, index=False)
+        print(f"  Saved {p}th percentile thresholds to: {csv_path}")
+
+    # Generate per-mouse PDFs for each percentile
     print("\n" + "="*60)
     print("GENERATING PER-MOUSE VISUALIZATIONS")
     print("="*60)
 
-    pdf_dir = os.path.join(output_dir, 'per_mouse_pdfs')
-    os.makedirs(pdf_dir, exist_ok=True)
+    for p in percentiles_to_compute:
+        print(f"\n  Generating visualizations for {p}th percentile...")
+        p_str = f"p{int(p)}" if p == int(p) else f"p{int(p*10)}"
+        pdf_dir = os.path.join(output_dir, f'per_mouse_pdfs_{p_str}')
+        os.makedirs(pdf_dir, exist_ok=True)
 
-    for mouse, surrogate_data in all_surrogate_data.items():
-        if surrogate_data is not None:
-            pdf_path = os.path.join(pdf_dir, f'{mouse}_surrogate_analysis_per_day.pdf')
-            print(f"  Generating PDF for {mouse}...")
-            plot_surrogate_distributions(mouse, surrogate_data, pdf_path)
+        for mouse, surrogate_data in all_surrogate_data[p].items():
+            if surrogate_data is not None:
+                pdf_path = os.path.join(pdf_dir, f'{mouse}_surrogate_analysis_per_day_{p_str}.pdf')
+                print(f"    Generating PDF for {mouse}...")
+                plot_surrogate_distributions(mouse, surrogate_data, pdf_path)
 
-    # Generate summary plots
+    # Generate summary plots for each percentile
     print("\n" + "="*60)
     print("GENERATING SUMMARY VISUALIZATIONS")
     print("="*60)
 
-    summary_pdf_path = os.path.join(output_dir, 'surrogate_threshold_summary_per_day.pdf')
-    plot_threshold_summary_across_mice(all_results_df, summary_pdf_path)
+    for p in percentiles_to_compute:
+        p_str = f"p{int(p)}" if p == int(p) else f"p{int(p*10)}"
+        summary_pdf_path = os.path.join(output_dir, f'surrogate_threshold_summary_per_day_{p_str}.pdf')
+        print(f"  Generating summary for {p}th percentile...")
+        plot_threshold_summary_across_mice(all_results_dfs[p], summary_pdf_path)
 
-    # Print summary statistics
+    # Print summary statistics for each percentile
     print("\n" + "="*60)
     print("SUMMARY STATISTICS")
     print("="*60)
 
-    # Get percentile value for display
-    percentile_val = int(all_results_df['percentile_value'].iloc[0]) if len(all_results_df) > 0 else 95
+    for p in percentiles_to_compute:
+        print(f"\n{'='*60}")
+        print(f"PERCENTILE: {p}th")
+        print(f"{'='*60}")
 
-    for reward_group in ['R+', 'R-']:
-        group_mice = r_plus_mice if reward_group == 'R+' else r_minus_mice
-        group_data = all_results_df[all_results_df['mouse_id'].isin(group_mice)]
+        all_results_df = all_results_dfs[p]
 
-        print(f"\n{reward_group} Group (n={group_data['mouse_id'].nunique()} mice):")
-        for day in days:
-            day_data = group_data[group_data['day'] == day]
-            if len(day_data) > 0:
-                print(f"\n  Day {day}:")
-                print(f"    {percentile_val}th percentile: {day_data['threshold_percentile_mean'].mean():.4f} ± {day_data['threshold_percentile_mean'].std():.4f}")
-                print(f"    Max (FWER):       {day_data['threshold_max_mean'].mean():.4f} ± {day_data['threshold_max_mean'].std():.4f}")
+        for reward_group in ['R+', 'R-']:
+            group_mice = r_plus_mice if reward_group == 'R+' else r_minus_mice
+            group_data = all_results_df[all_results_df['mouse_id'].isin(group_mice)]
+
+            print(f"\n{reward_group} Group (n={group_data['mouse_id'].nunique()} mice):")
+            for day in days:
+                day_data = group_data[group_data['day'] == day]
+                if len(day_data) > 0:
+                    print(f"\n  Day {day}:")
+                    print(f"    {p}th percentile: {day_data['threshold_percentile_mean'].mean():.4f} ± {day_data['threshold_percentile_mean'].std():.4f}")
+                    print(f"    Max (FWER):       {day_data['threshold_max_mean'].mean():.4f} ± {day_data['threshold_max_mean'].std():.4f}")
 
     print("\n" + "="*60)
     print("ANALYSIS COMPLETE")
     print("="*60)
     print(f"\nProcessed {len(all_mice_to_process)} mice")
-    print(f"Total mouse-day combinations: {len(all_results_df)}")
+    print(f"Total mouse-day combinations per percentile: {len(all_results_dfs[percentiles_to_compute[0]])}")
+    print(f"Percentiles computed: {percentiles_to_compute}")
     print(f"Results saved to: {output_dir}")
     print(f"\nKey points:")
     print(f"  - Each mouse-day combination has its own threshold")
     print(f"  - Each day's threshold is computed using only that day's data")
+    print(f"  - Multiple percentiles ({percentiles_to_compute}) computed from same surrogates!")
     print(f"  - Thresholds can adapt to day-specific changes in neural activity")
+    print(f"\nOutput files:")
+    for p in percentiles_to_compute:
+        p_str = f"p{int(p)}" if p == int(p) else f"p{int(p*10)}"
+        print(f"  - CSV: surrogate_thresholds_per_day_{p_str}.csv")
+        print(f"  - PDFs: per_mouse_pdfs_{p_str}/ and surrogate_threshold_summary_per_day_{p_str}.pdf")
     print(f"\nNext steps:")
-    print(f"1. Review per-mouse PDFs in: {pdf_dir}")
-    print(f"2. Examine summary plots: {summary_pdf_path}")
-    print(f"3. Choose threshold type ({percentile_val}th percentile or max/FWER)")
+    print(f"1. Review per-mouse PDFs for each percentile")
+    print(f"2. Examine summary plots for each percentile")
+    print(f"3. Choose which percentile to use based on your conservative/liberal preference")
+    print(f"4. Use chosen threshold CSV with reactivation.py (threshold_mode='day')")
     print(f"4. Use reactivation.py and reactivation_lmi_prediction.py with threshold_mode='day'")

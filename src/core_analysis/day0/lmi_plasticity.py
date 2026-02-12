@@ -38,7 +38,7 @@ from src.utils.utils_plot import *
 
 # Analysis parameters
 RUN_FITTING = False
-GENERATE_PDFS = False
+GENERATE_PDFS = True
 SAMPLING_RATE = 30  # Hz
 RESPONSE_WIN = (0, 0.300)  # 0-300ms response window
 PSTH_WIN = (-0.5, 1.5)  # PSTH time window for visualization
@@ -1484,7 +1484,7 @@ def plot_lmi_vs_plasticity_scatter(results_lmi, response_df, output_dir, alpha=0
 
     # Keep only cells whose sigmoid fit is significantly better than flat —
     # without this the inflection point (and thus the pre/post split) is noise.
-    results_sig = results_lmi[results_lmi['p_value_vs_linear'] < alpha].copy()
+    results_sig = results_lmi[results_lmi['p_value_vs_flat'] < alpha].copy()
     print(f"  LMI-significant cells passing sigmoid vs flat: {len(results_sig)} "
           f"(of {len(results_lmi)} total LMI-significant)")
 
@@ -2032,7 +2032,10 @@ def plot_participation_rate_before_after_inflection_by_groups(
     print("\nPlotting participation rate before/after inflection by LMI × plasticity groups...")
 
     # --- Build merged dataframe (same pipeline as participation scatter) ---
+    # Filter to LMI-significant cells that also pass sigmoid vs flat test
     results_sig = results_lmi[results_lmi['p_value_vs_flat'] < alpha].copy()
+    print(f"  LMI-significant cells passing sigmoid vs flat: {len(results_sig)} "
+          f"(of {len(results_lmi)} total LMI-significant)")
 
     pivot = response_df.pivot_table(
         index=['mouse_id', 'roi'],
@@ -3354,17 +3357,17 @@ def main(run_fitting=RUN_FITTING, generate_pdfs=GENERATE_PDFS):
         print("="*70)
 
         print(f"\n  Found {len(results_lmi)} filtered cells")
-        print(f"  Generating PDF for top 50 cells sorted by LMI (descending)...")
+        print(f"  Generating PDF for top 150 cells sorted by LMI (descending)...")
 
-        # # Sort by LMI in descending order
-        # results_lmi_sorted = results_lmi.sort_values('lmi', ascending=False)
+        # Sort by LMI in descending order
+        results_lmi_sorted = results_lmi.sort_values('lmi', ascending=False)
 
-        # create_cell_pdf_report(
-        #     results_lmi_sorted, OUTPUT_DIR,
-        #     'plasticity_cells_top50_by_positive_lmi.pdf',
-        #     n_cells=50,
-        #     sort_by='lmi'
-        # )
+        create_cell_pdf_report(
+            results_lmi_sorted, OUTPUT_DIR,
+            'plasticity_cells_top150_by_positive_lmi.pdf',
+            n_cells=150,
+            sort_by='lmi'
+        )
     
         # Same for negative cells.
         # Sort by LMI in ascending order
@@ -3372,8 +3375,8 @@ def main(run_fitting=RUN_FITTING, generate_pdfs=GENERATE_PDFS):
 
         create_cell_pdf_report(
             results_lmi_sorted, OUTPUT_DIR,
-            'plasticity_cells_top50_by_negative_lmi.pdf',
-            n_cells=50,
+            'plasticity_cells_top150_by_negative_lmi.pdf',
+            n_cells=150,
             sort_by='lmi'
         )
     elif generate_pdfs:

@@ -5,12 +5,17 @@ This script analyzes whether a neuron's participation in reactivation events
 predicts its Learning Modulation Index (LMI). It computes participation rates
 across days (baseline, learning, post-learning) and correlates with LMI values.
 
+**IMPORTANT**: This script loads pre-computed reactivation events from
+reactivation.py to ensure consistency. It does NOT detect events independently.
+Make sure to run reactivation.py with mode='compute' first.
+
 Approach:
-1. For each reactivation event, extract cell responses in ±150ms window
-2. Define participation: average response ≥ 5% dF/F
-3. Compute participation rates per cell, per day
-4. Aggregate: Baseline (days -2,-1), Learning (day 0), Post (days +1,+2)
-5. Correlate participation with LMI, separately by LMI sign and reward group
+1. Load pre-computed reactivation events from reactivation_results.pkl
+2. For each reactivation event, extract cell responses in ±150ms window
+3. Define participation: average response ≥ 5% dF/F
+4. Compute participation rates per cell, per day
+5. Aggregate: Baseline (days -2,-1), Learning (day 0), Post (days +1,+2)
+6. Correlate participation with LMI, separately by LMI sign and reward group
 
 Output:
 - CSV files with participation rates and correlation statistics
@@ -53,33 +58,10 @@ days = [-2, -1, 0, 1, 2]
 days_str = ['-2', '-1', '0', '+1', '+2']
 n_map_trials = 40  # Number of mapping trials for template
 
-# Event detection parameters (must match reactivation.py)
-threshold_type = 'percentile'  # Options: 'percentile' or 'max' (FWER)
-threshold_mode = 'mouse'  # Options: 'mouse' (baseline-derived, same for all days) or 'day' (per-day thresholds)
-threshold_dff = None  # 5% dff threshold for template cells (use None for all cells)
-threshold_corr = 0.45  # Default correlation threshold for event detection (if no surrogate thresholds available)
-min_event_distance_ms = 500
-min_event_distance_frames = int(min_event_distance_ms / 1000 * sampling_rate)
-prominence = 0.15  # Minimum prominence of peaks for event detection (vertical distance to contour line)
-
-# NOTE: Surrogate-based thresholds
-# If reactivation_surrogates.py or reactivation_surrogates_per_day.py has been run,
-# the script will automatically load and use thresholds instead of the fixed threshold_corr value.
-#
-# threshold_type options:
-#   - 'percentile': Uses the percentile specified in surrogate scripts (default: 99.9th)
-#   - 'max' (FWER/maximum): More conservative, controls family-wise error rate
-#
-# threshold_mode options:
-#   - 'mouse': One threshold per mouse (from baseline days -2 and -1), applied to all days
-#              Loads from: reactivation_surrogates/surrogate_thresholds.csv
-#   - 'day': Separate threshold per mouse-day combination, computed from each day's data
-#            Loads from: reactivation_surrogates_per_day/surrogate_thresholds_per_day.csv
-
 # Participation parameters
 event_window_ms = 150  # ±150ms around event (total 300ms)
 event_window_frames = int(event_window_ms / 1000 * sampling_rate)  # ±5 frames
-participation_threshold = 0.1  # 5% dF/F for participation
+participation_threshold = 0.05  # 5% dF/F for participation
 min_events_for_reliability = 5  # Flag estimates based on < 5 events
 
 # LMI thresholds (matches characterize_LMI_cells.py)
@@ -94,6 +76,10 @@ alpha_fdr = 0.05  # FDR correction level
 
 # Visualization
 sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1)
+
+# Path to saved reactivation results
+save_dir = os.path.join(io.results_dir, 'reactivation')
+reactivation_results_file = os.path.join(save_dir, 'reactivation_results.pkl')
 
 # Load database
 _, _, all_mice, db = io.select_sessions_from_db(
@@ -123,7 +109,41 @@ print(f"Found {len(r_minus_mice)} R- mice: {r_minus_mice}")
 # CORE FUNCTIONS
 # =============================================================================
 
-def extract_event_responses(mouse, day, verbose=True, threshold_dict=None, inflection_points=None):
+def load_reactivation_results(results_file):
+    """
+    Load pre-computed reactivation results from reactivation.py.
+
+    Parameters
+    ----------
+    results_file : str
+        Path to the reactivation_results.pkl file
+
+    Returns
+    -------
+    dict
+        Dictionary with 'r_plus_results' and 'r_minus_results'
+    """
+    import pickle
+
+    if not os.path.exists(results_file):
+        raise FileNotFoundError(
+            f"Reactivation results file not found: {results_file}\n"
+            f"Please run reactivation.py with mode='compute' first."
+        )
+
+    print(f"\nLoading pre-computed reactivation events from: {results_file}")
+    with open(results_file, 'rb') as f:
+        results_data = pickle.load(f)
+
+    r_plus_results = results_data['r_plus_results']
+    r_minus_results = results_data['r_minus_results']
+
+    print(f"✓ Loaded results for {len(r_plus_results)} R+ mice and {len(r_minus_results)} R- mice")
+
+    return r_plus_results, r_minus_results
+
+
+def extract_event_responses(mouse, day, verbose=True, threshold_dict=None, inflection_points=None, preloaded_events=None):
     """
     Extract cell responses around reactivation events for a single mouse and day.
 
@@ -138,10 +158,15 @@ def extract_event_responses(mouse, day, verbose=True, threshold_dict=None, infle
     threshold_dict : dict, optional
         Per-mouse, per-day thresholds from surrogate analysis.
         If None, uses global threshold_corr parameter.
+        NOTE: Only used if preloaded_events is None (for backwards compatibility).
     inflection_points : dict, optional
         Dictionary mapping (mouse_id, roi) to inflection trial_w value (1-indexed).
         If provided and day==0, adds 'inflection_phase' column to responses_df
         with values: 'before', 'after', 'at_inflection', or 'unknown'.
+    preloaded_events : np.ndarray, optional
+        Pre-computed event indices from reactivation.py.
+        If provided, these events are used instead of detecting new ones.
+        This ensures consistency with the main reactivation analysis.
 
     Returns
     -------
@@ -192,14 +217,21 @@ def extract_event_responses(mouse, day, verbose=True, threshold_dict=None, infle
 
         correlations = compute_template_correlation(data, template)
 
-        # Step 4: Detect events - use per-mouse, per-day threshold if available
-        current_threshold = get_threshold_for_mouse_day(threshold_dict, mouse, day, threshold_corr, threshold_mode)
-        if verbose and threshold_dict is not None:
-            print(f"    Using threshold: {current_threshold:.4f} (surrogate-based, {threshold_mode} mode)")
-        events = detect_reactivation_events(correlations, current_threshold, min_event_distance_frames)
-
-        if verbose:
-            print(f"    Events detected: {len(events)}")
+        # Step 4: Get events - use preloaded if available, otherwise detect
+        if preloaded_events is not None:
+            events = preloaded_events
+            if verbose:
+                print(f"    Using pre-computed events from reactivation.py: {len(events)} events")
+        else:
+            # Fallback: detect events (for backwards compatibility)
+            current_threshold = get_threshold_for_mouse_day(threshold_dict, mouse, day, threshold_corr, threshold_mode)
+            if verbose:
+                if threshold_dict is not None:
+                    print(f"    Using threshold: {current_threshold:.4f} (surrogate-based, {threshold_mode} mode)")
+                print(f"    WARNING: Detecting events independently (not using reactivation.py results)")
+            events = detect_reactivation_events(correlations, current_threshold, min_event_distance_frames)
+            if verbose:
+                print(f"    Events detected: {len(events)}")
 
         if len(events) == 0:
             if verbose:
@@ -637,7 +669,7 @@ def correlate_with_lmi(merged_df, participation_metric='learning_rate', reliable
 # MAIN ANALYSIS FUNCTION
 # =============================================================================
 
-def analyze_mouse_participation(mouse, days=[-2, -1, 0, 1, 2], verbose=True, threshold_dict=None):
+def analyze_mouse_participation(mouse, days=[-2, -1, 0, 1, 2], verbose=True, threshold_dict=None, preloaded_results=None):
     """
     Analyze reactivation participation for a single mouse across multiple days.
 
@@ -652,6 +684,10 @@ def analyze_mouse_participation(mouse, days=[-2, -1, 0, 1, 2], verbose=True, thr
     threshold_dict : dict, optional
         Per-mouse, per-day thresholds from surrogate analysis.
         If None, uses global threshold_corr parameter.
+        NOTE: Only used if preloaded_results is None (for backwards compatibility).
+    preloaded_results : dict, optional
+        Pre-computed reactivation results from reactivation.py.
+        Expected structure: results['days'][day]['events']
 
     Returns
     -------
@@ -669,7 +705,15 @@ def analyze_mouse_participation(mouse, days=[-2, -1, 0, 1, 2], verbose=True, thr
         if verbose:
             print(f"\nProcessing Day {day}...")
 
-        responses_df, n_events = extract_event_responses(mouse, day, verbose=verbose, threshold_dict=threshold_dict)
+        # Get preloaded events if available
+        preloaded_events = None
+        if preloaded_results is not None and day in preloaded_results.get('days', {}):
+            preloaded_events = preloaded_results['days'][day]['events']
+
+        responses_df, n_events = extract_event_responses(
+            mouse, day, verbose=verbose, threshold_dict=threshold_dict,
+            preloaded_events=preloaded_events
+        )
 
         if responses_df is not None and len(responses_df) > 0:
             all_responses.append(responses_df)
@@ -691,7 +735,7 @@ def analyze_mouse_participation(mouse, days=[-2, -1, 0, 1, 2], verbose=True, thr
     return participation_df
 
 
-def process_single_mouse(mouse, days, verbose=False, threshold_dict=None):
+def process_single_mouse(mouse, days, verbose=False, threshold_dict=None, preloaded_results=None):
     """
     Wrapper for parallel processing.
 
@@ -705,13 +749,18 @@ def process_single_mouse(mouse, days, verbose=False, threshold_dict=None):
         Print progress information
     threshold_dict : dict, optional
         Per-mouse, per-day thresholds from surrogate analysis
+    preloaded_results : dict, optional
+        Pre-computed reactivation results for this mouse from reactivation.py
 
     Returns
     -------
     tuple
         (mouse_id, participation_df)
     """
-    participation_df = analyze_mouse_participation(mouse, days=days, verbose=verbose, threshold_dict=threshold_dict)
+    participation_df = analyze_mouse_participation(
+        mouse, days=days, verbose=verbose, threshold_dict=threshold_dict,
+        preloaded_results=preloaded_results
+    )
     return (mouse, participation_df)
 
 
@@ -719,90 +768,102 @@ def process_single_mouse(mouse, days, verbose=False, threshold_dict=None):
 # VISUALIZATION FUNCTIONS
 # =============================================================================
 
-def plot_scatter_participation_vs_lmi(merged_df, participation_metric='learning_rate',
-                                       save_path=None):
+def plot_participation_rate_vs_lmi(merged_df, participation_metric='learning_rate',
+                                    significant_only=False, save_path=None):
     """
-    Create scatter plots of participation vs LMI for different groups.
+    Create scatter plots of participation rate (y) vs LMI (x) for R+ and R-.
 
-    Page 1: 2×2 panels [R+, R-] × [LMI+, LMI-]
+    Simple 1x2 panel layout showing how reactivation participation relates to LMI.
+
+    Parameters
+    ----------
+    merged_df : pd.DataFrame
+        Merged participation and LMI data
+    participation_metric : str
+        Which participation metric to use
+    significant_only : bool
+        If True, only include cells with significant LMI (lmi_p >= 0.975 or <= 0.025)
+    save_path : str
+        Path to save figure
     """
-    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     reward_groups = ['R+', 'R-']
-    lmi_categories = ['positive', 'negative']
 
     for i, reward_group in enumerate(reward_groups):
-        for j, lmi_category in enumerate(lmi_categories):
-            ax = axes[j, i]
+        ax = axes[i]
 
-            # Filter data
-            mask = (merged_df['reward_group'] == reward_group) & \
-                   (merged_df['lmi_category'] == lmi_category)
+        # Filter data for this reward group
+        mask = (merged_df['reward_group'] == reward_group)
 
-            # Add reliability filter
-            if participation_metric in ['baseline_rate']:
-                mask &= merged_df['reliable_baseline']
-            elif participation_metric in ['learning_rate']:
-                mask &= merged_df['reliable_learning']
-            elif participation_metric in ['post_rate']:
-                mask &= merged_df['reliable_post']
-            elif participation_metric in ['delta_learning', 'delta_post']:
-                mask &= merged_df['reliable_baseline']
+        # Filter for significant LMI cells if requested
+        if significant_only:
+            mask &= ((merged_df['lmi_p'] >= LMI_POSITIVE_THRESHOLD) |
+                    (merged_df['lmi_p'] <= LMI_NEGATIVE_THRESHOLD))
 
-            group_data = merged_df[mask]
+        group_data = merged_df[mask]
 
-            # Remove NaN values
-            valid_mask = ~(group_data[participation_metric].isna() | group_data['lmi'].isna())
-            x = group_data.loc[valid_mask, participation_metric].values
-            y = group_data.loc[valid_mask, 'lmi'].values
+        # Remove NaN values
+        valid_mask = ~(group_data['lmi'].isna() | group_data[participation_metric].isna())
+        x = group_data.loc[valid_mask, 'lmi'].values
+        y = group_data.loc[valid_mask, participation_metric].values
 
-            if len(x) < 3:
-                ax.text(0.5, 0.5, f'Insufficient data\n(n={len(x)})',
-                       ha='center', va='center', transform=ax.transAxes, fontsize=12)
-                ax.set_xlabel(participation_metric.replace('_', ' ').title())
-                ax.set_ylabel('LMI')
-                ax.set_title(f'{reward_group} {lmi_category.capitalize()} LMI')
-                continue
+        if len(x) < 3:
+            ax.text(0.5, 0.5, f'Insufficient data\n(n={len(x)})',
+                   ha='center', va='center', transform=ax.transAxes, fontsize=12)
+            ax.set_xlabel('LMI', fontweight='bold')
+            ax.set_ylabel('Participation Rate (Day 0)', fontweight='bold')
+            title_suffix = ' (Significant LMI only)' if significant_only else ''
+            ax.set_title(f'{reward_group}{title_suffix}', fontweight='bold', fontsize=14)
+            continue
 
-            # Scatter plot
-            ax.scatter(x, y, s=40, alpha=0.6, edgecolors='black', linewidths=0.5)
+        # Scatter plot
+        ax.scatter(x, y, s=40, alpha=0.6, edgecolors='black', linewidths=0.5, color='#2ca02c')
 
-            # Regression line
-            if len(x) >= 3:
-                slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
-                x_line = np.linspace(x.min(), x.max(), 100)
-                y_line = slope * x_line + intercept
-                ax.plot(x_line, y_line, 'r--', linewidth=2, alpha=0.7)
+        # Reference lines
+        ax.axhline(0.5, color='gray', linestyle='--', linewidth=1, alpha=0.4)
+        ax.axvline(0, color='gray', linestyle='--', linewidth=1, alpha=0.4)
 
-                # Compute Spearman correlation
-                spearman_r, spearman_p = spearmanr(x, y)
+        # Regression line and statistics
+        if len(x) >= 3:
+            slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+            x_line = np.linspace(x.min(), x.max(), 100)
+            y_line = slope * x_line + intercept
+            ax.plot(x_line, y_line, 'r--', linewidth=2, alpha=0.7)
 
-                # Add statistics text
-                stats_text = f'n = {len(x)} cells\n'
-                stats_text += f'Spearman r = {spearman_r:.3f}\n'
-                if spearman_p < 0.001:
-                    stats_text += f'p < 0.001 ***'
-                elif spearman_p < 0.01:
-                    stats_text += f'p = {spearman_p:.3f} **'
-                elif spearman_p < 0.05:
-                    stats_text += f'p = {spearman_p:.3f} *'
-                else:
-                    stats_text += f'p = {spearman_p:.3f} ns'
+            # Compute Pearson correlation
+            pearson_r, pearson_p = pearsonr(x, y)
 
-                ax.text(0.05, 0.95, stats_text, transform=ax.transAxes,
-                       fontsize=9, verticalalignment='top',
-                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'))
+            # Add statistics text
+            stats_text = f'n = {len(x)} cells\n'
+            stats_text += f'Pearson r = {pearson_r:.3f}\n'
+            if pearson_p < 0.001:
+                stats_text += f'p < 0.001 ***'
+            elif pearson_p < 0.01:
+                stats_text += f'p = {pearson_p:.3f} **'
+            elif pearson_p < 0.05:
+                stats_text += f'p = {pearson_p:.3f} *'
+            else:
+                stats_text += f'p = {pearson_p:.3f} ns'
 
-            ax.set_xlabel(participation_metric.replace('_', ' ').title(), fontweight='bold')
-            ax.set_ylabel('LMI', fontweight='bold')
-            ax.set_title(f'{reward_group} {lmi_category.capitalize()} LMI', fontweight='bold')
-            ax.grid(True, alpha=0.3)
+            ax.text(0.05, 0.95, stats_text, transform=ax.transAxes,
+                   fontsize=10, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'))
+
+        ax.set_xlabel('LMI', fontweight='bold', fontsize=12)
+        ax.set_ylabel('Participation Rate (Day 0)', fontweight='bold', fontsize=12)
+        title_suffix = ' (Significant LMI only)' if significant_only else ''
+        ax.set_title(f'{reward_group}{title_suffix}', fontweight='bold', fontsize=14)
+        ax.set_xlim(-1.1, 1.1)
+        ax.set_ylim(-.1, 1.1)
+        ax.grid(True, alpha=0.3)    
 
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, format='pdf', dpi=300, bbox_inches='tight')
+        plt.savefig(save_path, format='svg', dpi=300, bbox_inches='tight')
         plt.close()
+        print(f"  Saved to: {save_path}")
     else:
         return fig
 
@@ -811,8 +872,12 @@ def plot_temporal_evolution(merged_df, participation_df_all, save_path=None):
     """
     Plot participation rates across days for LMI+ vs LMI- cells.
 
-    Page 2: Line plots [R+ left, R- right]
+    Barplot showing per-mouse averages across days, with lines connecting
+    individual mice. Separate panels for R+ and R-. Includes paired Wilcoxon
+    test for LMI+ vs LMI- at each day.
     """
+    from scipy.stats import wilcoxon
+
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
     reward_groups = ['R+', 'R-']
@@ -822,137 +887,191 @@ def plot_temporal_evolution(merged_df, participation_df_all, save_path=None):
     for i, reward_group in enumerate(reward_groups):
         ax = axes[i]
 
+        # Prepare data structure for barplot
+        plot_data_lmi_pos = []
+        plot_data_lmi_neg = []
+
         for lmi_category in lmi_categories:
-            # Filter cells
+            # Filter cells by reward group and LMI category
             mask = (merged_df['reward_group'] == reward_group) & \
                    (merged_df['lmi_category'] == lmi_category)
-            cell_list = merged_df[mask][['mouse_id', 'roi']].values
+            cells_df = merged_df[mask][['mouse_id', 'roi']]
 
-            if len(cell_list) == 0:
+            if len(cells_df) == 0:
                 continue
 
-            # Get participation data for these cells
-            participation_data = []
-            for mouse_id, roi in cell_list:
-                cell_mask = (participation_df_all['mouse_id'] == mouse_id) & \
-                           (participation_df_all['roi'] == roi)
-                cell_data = participation_df_all[cell_mask]
-                participation_data.append(cell_data)
+            # Get participation data for these cells and compute per-mouse averages
+            for mouse_id in cells_df['mouse_id'].unique():
+                mouse_cells = cells_df[cells_df['mouse_id'] == mouse_id]
 
-            if len(participation_data) == 0:
-                continue
+                # Get participation data for this mouse's cells
+                for day in days:
+                    participation_rates = []
+                    for _, row in mouse_cells.iterrows():
+                        cell_mask = (participation_df_all['mouse_id'] == mouse_id) & \
+                                   (participation_df_all['roi'] == row['roi']) & \
+                                   (participation_df_all['day'] == day)
+                        cell_data = participation_df_all[cell_mask]
+                        if len(cell_data) > 0:
+                            participation_rates.append(cell_data['participation_rate'].values[0])
 
-            participation_combined = pd.concat(participation_data, ignore_index=True)
+                    # If no data for this day, use 0 (no events detected = 0% participation)
+                    # Otherwise compute mean across cells
+                    if len(participation_rates) > 0:
+                        mean_rate = np.mean(participation_rates)
+                    else:
+                        mean_rate = 0.0
 
-            # Compute mean and SEM per day
-            day_stats = participation_combined.groupby('day')['participation_rate'].agg(['mean', 'sem']).reset_index()
-
-            ax.plot(day_stats['day'], day_stats['mean'], '-o',
-                   color=colors[lmi_category], linewidth=2, markersize=8,
-                   label=f'{lmi_category.capitalize()} LMI (n={len(cell_list)})')
-
-            ax.fill_between(day_stats['day'],
-                           day_stats['mean'] - day_stats['sem'],
-                           day_stats['mean'] + day_stats['sem'],
-                           color=colors[lmi_category], alpha=0.3)
-
-        ax.set_xlabel('Day', fontweight='bold', fontsize=12)
-        ax.set_ylabel('Participation Rate', fontweight='bold', fontsize=12)
-        ax.set_title(f'{reward_group} Mice', fontweight='bold', fontsize=14)
-        ax.set_xticks(days)
-        ax.set_xticklabels([str(d) for d in days])
-        ax.legend(loc='best', fontsize=10)
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(0, 1)
-
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, format='pdf', dpi=300, bbox_inches='tight')
-        plt.close()
-    else:
-        return fig
-
-
-def plot_change_scores(merged_df, save_path=None):
-    """
-    Plot change scores (delta participation) vs LMI.
-
-    Page 3: Same 2×2 layout as Page 1, but for delta_learning
-    """
-    return plot_scatter_participation_vs_lmi(merged_df, participation_metric='delta_learning',
-                                              save_path=save_path)
-
-
-def plot_distributions(merged_df, participation_df_all, save_path=None):
-    """
-    Plot distribution comparisons of participation rates.
-
-    Page 4: Violin/box plots grouped by Day × LMI sign
-    """
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-
-    reward_groups = ['R+', 'R-']
-
-    for i, reward_group in enumerate(reward_groups):
-        ax = axes[i]
-
-        # Prepare data
-        plot_data = []
-
-        for lmi_category in ['positive', 'negative']:
-            # Filter cells
-            mask = (merged_df['reward_group'] == reward_group) & \
-                   (merged_df['lmi_category'] == lmi_category)
-            cell_list = merged_df[mask][['mouse_id', 'roi']].values
-
-            if len(cell_list) == 0:
-                continue
-
-            # Get participation data
-            for mouse_id, roi in cell_list:
-                cell_mask = (participation_df_all['mouse_id'] == mouse_id) & \
-                           (participation_df_all['roi'] == roi)
-                cell_data = participation_df_all[cell_mask]
-
-                for _, row in cell_data.iterrows():
-                    plot_data.append({
-                        'day': row['day'],
-                        'participation_rate': row['participation_rate'],
+                    data_dict = {
+                        'mouse_id': mouse_id,
+                        'day': day,
+                        'participation_rate': mean_rate,
                         'lmi_category': lmi_category
-                    })
+                    }
 
-        if len(plot_data) == 0:
+                    if lmi_category == 'positive':
+                        plot_data_lmi_pos.append(data_dict)
+                    else:
+                        plot_data_lmi_neg.append(data_dict)
+
+        # Convert to DataFrames
+        df_pos = pd.DataFrame(plot_data_lmi_pos) if plot_data_lmi_pos else pd.DataFrame()
+        df_neg = pd.DataFrame(plot_data_lmi_neg) if plot_data_lmi_neg else pd.DataFrame()
+
+        # Combine for plotting
+        all_data = []
+        if not df_pos.empty:
+            all_data.append(df_pos)
+        if not df_neg.empty:
+            all_data.append(df_neg)
+
+        if len(all_data) == 0:
             ax.text(0.5, 0.5, 'No data', ha='center', va='center',
                    transform=ax.transAxes, fontsize=12)
             continue
 
-        plot_df = pd.DataFrame(plot_data)
+        plot_df = pd.concat(all_data, ignore_index=True)
 
-        # Violin plot
-        sns.violinplot(data=plot_df, x='day', y='participation_rate', hue='lmi_category',
-                      ax=ax, palette={'positive': '#d62728', 'negative': '#1f77b4'},
-                      split=False, inner='quartile')
+        # Perform paired Wilcoxon test for each day
+        print(f"\n  {reward_group} - Paired Wilcoxon tests (LMI+ vs LMI-):")
+        wilcoxon_results = {}
+        for day in days:
+            # Get data for both LMI categories for this day
+            pos_day = df_pos[df_pos['day'] == day]
+            neg_day = df_neg[df_neg['day'] == day]
 
-        ax.set_xlabel('Day', fontweight='bold', fontsize=12)
-        ax.set_ylabel('Participation Rate', fontweight='bold', fontsize=12)
+            # Find mice present in both groups
+            mice_pos = set(pos_day['mouse_id'].unique())
+            mice_neg = set(neg_day['mouse_id'].unique())
+            mice_both = mice_pos & mice_neg
+
+            if len(mice_both) >= 3:  # Need at least 3 pairs for meaningful test
+                # Get paired data
+                pos_values = []
+                neg_values = []
+                for mouse_id in sorted(mice_both):
+                    pos_val = pos_day[pos_day['mouse_id'] == mouse_id]['participation_rate'].values[0]
+                    neg_val = neg_day[neg_day['mouse_id'] == mouse_id]['participation_rate'].values[0]
+                    pos_values.append(pos_val)
+                    neg_values.append(neg_val)
+
+                # Wilcoxon signed-rank test
+                try:
+                    stat, p_val = wilcoxon(pos_values, neg_values)
+                    wilcoxon_results[day] = p_val
+                    sig_marker = '***' if p_val < 0.001 else '**' if p_val < 0.01 else '*' if p_val < 0.05 else 'ns'
+                    print(f"    Day {day:+2d}: n={len(mice_both)} mice, p={p_val:.4f} {sig_marker}")
+                except:
+                    print(f"    Day {day:+2d}: Test failed (likely all pairs identical)")
+                    wilcoxon_results[day] = np.nan
+            else:
+                print(f"    Day {day:+2d}: Insufficient paired data (n={len(mice_both)} mice)")
+                wilcoxon_results[day] = np.nan
+
+        # Create barplot with individual mouse data points connected by lines
+        x_positions = {day: idx for idx, day in enumerate(days)}
+        bar_width = 0.35
+
+        # Plot bars (mean across mice with 95% CI)
+        for j, lmi_category in enumerate(lmi_categories):
+            cat_data = plot_df[plot_df['lmi_category'] == lmi_category]
+            if len(cat_data) == 0:
+                continue
+
+            # Compute stats per day
+            day_stats_list = []
+            for day in days:
+                day_data = cat_data[cat_data['day'] == day]['participation_rate'].values
+                if len(day_data) > 0:
+                    mean_val = np.mean(day_data)
+                    # 95% confidence interval
+                    ci = 1.96 * np.std(day_data, ddof=1) / np.sqrt(len(day_data))
+                    day_stats_list.append({
+                        'day': day,
+                        'mean': mean_val,
+                        'ci': ci
+                    })
+
+            day_stats = pd.DataFrame(day_stats_list)
+
+            x_vals = [x_positions[day] + (j - 0.5) * bar_width for day in day_stats['day']]
+
+            ax.bar(x_vals, day_stats['mean'],
+                  width=bar_width, label=f'{lmi_category.capitalize()} LMI',
+                  color=colors[lmi_category], alpha=0.7, edgecolor='black', linewidth=1)
+
+            # Add seaborn-style error bars (95% CI) - thinner, cleaner style
+            ax.errorbar(x_vals, day_stats['mean'],
+                       yerr=day_stats['ci'],
+                       fmt='none', ecolor='black', capsize=4, linewidth=1.2,
+                       capthick=1.2, alpha=0.9, zorder=10)
+
+            # Plot individual mouse trajectories
+            mice = cat_data['mouse_id'].unique()
+            for mouse_id in mice:
+                mouse_data = cat_data[cat_data['mouse_id'] == mouse_id].sort_values('day')
+                mouse_x = [x_positions[day] + (j - 0.5) * bar_width for day in mouse_data['day']]
+                mouse_y = mouse_data['participation_rate'].values
+
+                # Lines only (no markers), colored by LMI category
+                ax.plot(mouse_x, mouse_y, '-', color=colors[lmi_category],
+                       linewidth=0.8, alpha=0.4, zorder=5)
+
+        # Add significance markers for Wilcoxon tests
+        y_max = 0.57
+        for day in days:
+            if day in wilcoxon_results and not np.isnan(wilcoxon_results[day]):
+                p_val = wilcoxon_results[day]
+                x_center = x_positions[day]
+
+                if p_val < 0.05:
+                    sig_marker = '***' if p_val < 0.001 else '**' if p_val < 0.01 else '*'
+                    ax.text(x_center, y_max, sig_marker, ha='center', va='bottom',
+                           fontsize=12, fontweight='bold')
+
+        ax.set_xlabel('Day', fontweight='bold', fontsize=13)
+        ax.set_ylabel('Participation Rate', fontweight='bold', fontsize=13)
         ax.set_title(f'{reward_group} Mice', fontweight='bold', fontsize=14)
-        ax.legend(title='LMI Category', fontsize=10)
+        ax.set_xticks([x_positions[day] for day in days])
+        ax.set_xticklabels([str(d) for d in days])
+        ax.legend(loc='best', fontsize=11)
         ax.grid(True, alpha=0.3, axis='y')
-        ax.set_ylim(0, None)
+        ax.set_ylim(0, 0.6)
+        sns.despine(ax=ax)
 
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, format='pdf', dpi=300, bbox_inches='tight')
+        plt.savefig(save_path, format='svg', dpi=300, bbox_inches='tight')
         plt.close()
+        print(f"  Saved to: {save_path}")
     else:
         return fig
 
 
-def generate_visualizations(merged_df, participation_df_all, correlation_results_df, output_dir):
+def generate_visualizations(merged_df, participation_df_all, output_dir):
     """
-    Generate all visualization PDFs.
+    Generate visualization figures as SVG.
 
     Parameters
     ----------
@@ -960,8 +1079,6 @@ def generate_visualizations(merged_df, participation_df_all, correlation_results
         Merged participation and LMI data
     participation_df_all : pd.DataFrame
         Per-day participation data
-    correlation_results_df : pd.DataFrame
-        Correlation statistics
     output_dir : str
         Directory to save figures
     """
@@ -969,51 +1086,29 @@ def generate_visualizations(merged_df, participation_df_all, correlation_results
     print("GENERATING VISUALIZATIONS")
     print("="*60)
 
-    # Create multi-page PDF
-    pdf_path = os.path.join(output_dir, 'participation_lmi_analysis.pdf')
+    # Save figures as SVG
+    print("\n  Figure 1a: Participation rate vs LMI scatter plot (all cells)")
+    plot_participation_rate_vs_lmi(
+        merged_df,
+        participation_metric='learning_rate',
+        significant_only=False,
+        save_path=os.path.join(output_dir, 'participation_rate_vs_lmi_all.svg')
+    )
 
-    with PdfPages(pdf_path) as pdf:
-        # Page 1: Scatter plots - Learning participation vs LMI
-        print("  Page 1: Scatter plots (Learning participation vs LMI)")
-        fig = plot_scatter_participation_vs_lmi(merged_df, participation_metric='learning_rate')
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close()
+    print("\n  Figure 1b: Participation rate vs LMI scatter plot (significant LMI only)")
+    plot_participation_rate_vs_lmi(
+        merged_df,
+        participation_metric='learning_rate',
+        significant_only=True,
+        save_path=os.path.join(output_dir, 'participation_rate_vs_lmi_significant.svg')
+    )
 
-        # Page 2: Temporal evolution
-        print("  Page 2: Temporal evolution across days")
-        fig = plot_temporal_evolution(merged_df, participation_df_all)
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close()
-
-        # Page 3: Change scores vs LMI
-        print("  Page 3: Scatter plots (Change scores vs LMI)")
-        fig = plot_change_scores(merged_df)
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close()
-
-        # Page 4: Distribution comparisons
-        print("  Page 4: Distribution comparisons")
-        fig = plot_distributions(merged_df, participation_df_all)
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close()
-
-    print(f"\nSaved visualization PDF to: {pdf_path}")
-
-    # Also save individual plots as SVG
-    svg_dir = os.path.join(output_dir, 'svg_figures')
-    os.makedirs(svg_dir, exist_ok=True)
-
-    print("\n  Saving individual SVG figures...")
-    plot_scatter_participation_vs_lmi(merged_df, participation_metric='learning_rate',
-                                      save_path=os.path.join(svg_dir, 'scatter_learning_vs_lmi.svg'.replace('.svg', '.pdf')))
-    plot_temporal_evolution(merged_df, participation_df_all,
-                           save_path=os.path.join(svg_dir, 'temporal_evolution.svg'.replace('.svg', '.pdf')))
-    plot_change_scores(merged_df,
-                      save_path=os.path.join(svg_dir, 'scatter_delta_vs_lmi.svg'.replace('.svg', '.pdf')))
-    plot_distributions(merged_df, participation_df_all,
-                      save_path=os.path.join(svg_dir, 'distributions.svg'.replace('.svg', '.pdf')))
-
-    print(f"  Saved individual figures to: {svg_dir}")
+    print("\n  Figure 2: Temporal evolution across days (barplot per mouse)")
+    plot_temporal_evolution(
+        merged_df,
+        participation_df_all,
+        save_path=os.path.join(output_dir, 'temporal_evolution_per_mouse.svg')
+    )
 
 
 # =============================================================================
@@ -1047,7 +1142,7 @@ if __name__ == "__main__":
         raise ValueError(f"Invalid threshold_mode '{threshold_mode}'. Must be 'mouse' or 'day'.")
 
     threshold_dict = None
-    if os.path.exists(surrogate_csv_path):
+    if use_surrogate_thresholds and os.path.exists(surrogate_csv_path):
         print(f"\n{'='*60}")
         print("LOADING SURROGATE-BASED THRESHOLDS")
         print(f"{'='*60}")
@@ -1062,8 +1157,23 @@ if __name__ == "__main__":
             n_mouse_days = sum(len(days_dict) for days_dict in threshold_dict.values())
             print(f"Loaded thresholds for {n_mice} mice, {n_mouse_days} mouse-day combinations")
     else:
-        print(f"\nSurrogate threshold file not found: {surrogate_csv_path}")
-        print(f"Using default threshold: {threshold_corr}")
+        if not use_surrogate_thresholds:
+            print(f"\nuse_surrogate_thresholds=False: Using common threshold instead of surrogate-based thresholds")
+        elif not os.path.exists(surrogate_csv_path):
+            print(f"\nSurrogate threshold file not found: {surrogate_csv_path}")
+        print(f"Using common threshold: {threshold_corr}")
+
+    # Load pre-computed reactivation events from reactivation.py
+    print("\n" + "="*60)
+    print("LOADING PRE-COMPUTED REACTIVATION EVENTS")
+    print("="*60)
+
+    r_plus_reactivations, r_minus_reactivations = load_reactivation_results(reactivation_results_file)
+
+    # Create a combined dictionary for easy lookup
+    all_reactivation_results = {}
+    all_reactivation_results.update(r_plus_reactivations)
+    all_reactivation_results.update(r_minus_reactivations)
 
     # Process all mice in parallel
     print("\n" + "="*60)
@@ -1072,9 +1182,13 @@ if __name__ == "__main__":
 
     all_mice_to_process = r_plus_mice + r_minus_mice
     print(f"Processing {len(all_mice_to_process)} mice in parallel...")
+    print(f"Using pre-computed events from reactivation.py for consistency")
 
     results_list = Parallel(n_jobs=n_jobs, verbose=10)(
-        delayed(process_single_mouse)(mouse, days, verbose=False, threshold_dict=threshold_dict)
+        delayed(process_single_mouse)(
+            mouse, days, verbose=False, threshold_dict=threshold_dict,
+            preloaded_results=all_reactivation_results.get(mouse, None)
+        )
         for mouse in all_mice_to_process
     )
 
@@ -1119,6 +1233,47 @@ if __name__ == "__main__":
     csv_path = os.path.join(output_dir, 'participation_lmi_merged.csv')
     merged_df.to_csv(csv_path, index=False)
     print(f"Saved merged data to: {csv_path}")
+
+    # === DIAGNOSTIC: DATA AVAILABILITY ANALYSIS ===
+    print("\n" + "="*60)
+    print("DIAGNOSTIC: DATA AVAILABILITY PER MOUSE AND DAY")
+    print("="*60)
+
+    # Check how many cells have participation data for each day
+    for reward_group in ['R+', 'R-']:
+        print(f"\n{reward_group} mice:")
+        for lmi_cat in ['positive', 'negative']:
+            mask = (merged_df['reward_group'] == reward_group) & \
+                   (merged_df['lmi_category'] == lmi_cat)
+            cells = merged_df[mask][['mouse_id', 'roi']]
+
+            print(f"  {lmi_cat.capitalize()} LMI cells: {len(cells)} total")
+
+            # Count cells with data for each day
+            for day in days:
+                n_with_data = 0
+                for _, cell in cells.iterrows():
+                    cell_mask = (participation_df_all['mouse_id'] == cell['mouse_id']) & \
+                               (participation_df_all['roi'] == cell['roi']) & \
+                               (participation_df_all['day'] == day)
+                    if len(participation_df_all[cell_mask]) > 0:
+                        n_with_data += 1
+
+                pct = 100 * n_with_data / len(cells) if len(cells) > 0 else 0
+                print(f"    Day {day:+2d}: {n_with_data}/{len(cells)} cells ({pct:.1f}%)")
+
+    # Check reasons for missing data
+    print("\n  Possible reasons for missing data:")
+    print("  1. No reactivation events detected on that day for that mouse")
+    print("  2. Cell was not active/detected in the imaging on that day")
+    print("  3. Data quality issues for that specific day")
+    print(f"  4. Previously filtered out by reliability criterion (now removed)")
+
+    # Count events per mouse-day
+    print("\n  Checking event counts per mouse-day from participation data:")
+    event_summary = participation_df_all.groupby(['mouse_id', 'day'])['n_events'].agg(['mean', 'min', 'max']).reset_index()
+    print(f"\n  Event count summary (across all cells):")
+    print(event_summary.to_string(index=False))
 
     # === BEFORE/AFTER INFLECTION ANALYSIS (DAY 0 ONLY) ===
     print("\n" + "="*60)
@@ -1179,37 +1334,8 @@ if __name__ == "__main__":
             inflection_participation_df.to_csv(csv_path, index=False)
             print(f"\n  Saved before/after inflection rates to: {csv_path}")
 
-    # Compute correlations for different participation metrics
-    print("\n" + "="*60)
-    print("COMPUTING CORRELATIONS")
-    print("="*60)
-
-    participation_metrics = [
-        'baseline_rate', 'learning_rate', 'post_rate',
-        'delta_learning', 'delta_post'
-    ]
-
-    all_correlation_results = []
-    for metric in participation_metrics:
-        print(f"\n  Computing correlations for: {metric}")
-        corr_results = correlate_with_lmi(merged_df, participation_metric=metric, reliable_filter=True)
-        all_correlation_results.append(corr_results)
-
-    correlation_results_df = pd.concat(all_correlation_results, ignore_index=True)
-
-    # Save correlation results
-    csv_path = os.path.join(output_dir, 'participation_lmi_correlations.csv')
-    correlation_results_df.to_csv(csv_path, index=False)
-    print(f"\nSaved correlation results to: {csv_path}")
-
-    # Print summary
-    print("\n" + "="*60)
-    print("CORRELATION SUMMARY")
-    print("="*60)
-    print(correlation_results_df.to_string(index=False))
-
     # Generate visualizations
-    generate_visualizations(merged_df, participation_df_all, correlation_results_df, output_dir)
+    generate_visualizations(merged_df, participation_df_all, output_dir)
 
     print("\n" + "="*60)
     print("ANALYSIS COMPLETE")

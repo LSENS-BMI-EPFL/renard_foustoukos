@@ -223,8 +223,8 @@ mice_opto = io.select_mice_from_db(db_path, nwb_dir, experimenters=None,
 # # table.loc[(table.reward_group=='R+') & (table.day==0), 'session_id'].unique()
 # # sns.despine()    
 
-#     # Plot lick trace for a trial.
-#     # ------------------------
+# Plot lick trace for a trial.
+# ------------------------
 
 session_list, nwb_list, mice_list, db = io.select_sessions_from_db(
     db_path, nwb_dir, experimenters=None,
@@ -647,145 +647,179 @@ plt.savefig(output_file, format='svg', dpi=300)
 
 
 
-# Performance during sessions across mice during day 0.
-# -----------------------------------------------------
+# Performance during day 0: comparing reward groups (2x2 layout)
+# ----------------------------------------------------------------
 
 # Load the table from the CSV file.
 table_file = io.adjust_path_to_host(r'/mnt/lsens-analysis/Anthony_Renard/data_processed/behavior/behavior_imagingmice_table_5days_cut_with_learning_curves.csv')
 table = pd.read_csv(table_file)
 
-table.columns
-
 # Parameter: maximum number of trials per type to plot
-max_trials_per_type = 120
-
-# Performance over blocks - three representations
-fig, axes = plt.subplots(1, 3, sharey=True, figsize=(15, 4))
-
+max_trials_per_type = 100
 day = 0
 
-for i, (metric, ylabel, title) in enumerate([
-    ('outcome_w', 'Hit rate (raw)', 'Raw trial outcomes'),
-    ('hr_w', 'Hit rate (block avg)', 'Block-averaged performance'),
-    ('learning_curve_w', 'Lick probability', 'Fitted learning curves')
-]):
-    ax = axes[i]
+# Prepare non-realigned data (whisker trials on day 0)
+df_non_realigned = table.loc[(table.whisker_stim == 1) & (table.day == day)]
+df_non_realigned = df_non_realigned.loc[df_non_realigned.trial_w < max_trials_per_type]
 
-    for reward_group, color_w in zip(
-        ['R-', 'R+'],
-        behavior_palette[2:4],  # whisker colors
-    ): 
-        d = table[(table.day == day) & (table.reward_group == reward_group)]
-        # Cut to max_trials_per_type for each trial type
-        d_whisker = d.loc[d.trial_w < max_trials_per_type]
+# Prepare realigned data (aligned to first hit for each mouse)
+def realign_to_first_hit(data):
+    """Realign trial numbers to first hit for each mouse."""
+    realigned_data = []
 
-        # Plot the specified metric
-        sns.lineplot(
-            data=d_whisker,
-            x='trial_w', y=metric,
-            errorbar='ci', ax=ax, color=color_w, label=f'{reward_group}', linewidth=2,
-            err_kws={'edgecolor': 'none'}
-        )
+    for mouse in data['mouse_id'].unique():
+        mouse_data = data[data['mouse_id'] == mouse].copy()
+        mouse_data = mouse_data.sort_values('trial_w')
 
-    ax.set_title(title)
-    ax.set_xlabel('Whisker trial')
-    if i == 0:
-        ax.set_ylabel(ylabel)
-    ax.legend(frameon=False)
+        # Find first hit
+        first_hit_idx = mouse_data[mouse_data['outcome_w'] == 1].index
+        if len(first_hit_idx) > 0:
+            first_hit_trial = mouse_data.loc[first_hit_idx[0], 'trial_w']
+            # Create realigned trial number
+            mouse_data['trial_w_realigned'] = mouse_data['trial_w'] - first_hit_trial
+            realigned_data.append(mouse_data)
 
-sns.despine()
-plt.tight_layout()
+    return pd.concat(realigned_data, ignore_index=True)
 
-# Save the figure
-output_dir = io.adjust_path_to_host(r'/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/behavior')
-output_file = os.path.join(output_dir, 'performance_comparison_day0.svg')
-plt.savefig(output_file, format='svg', dpi=300)
+df_realigned = realign_to_first_hit(df_non_realigned)
+df_realigned = df_realigned.loc[df_realigned.trial_w_realigned < max_trials_per_type]
 
-
-
-
-
-
-
-# Performance over trials aligned to first whisker trial.
-# -------------------------------------------------------
-import matplotlib
-
-# Prepare data - simply filter for whisker trials on day 0
-n_trials = 120
-df = table.loc[(table.whisker_stim==1) & (table.day==0)]
-df = df.loc[df.trial_w <= n_trials]
-
-# Prepare data for single trial plot
-df_single = df.copy()
-
-# Prepare data for learning curve plot
-df_learning = df.copy()
-
-# Create three-panel figure
-fig, axes = plt.subplots(1, 2, sharey=True, figsize=(12, 5))
+# Create 2x2 figure
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 
 # Create colormap for p-values
 cmap = matplotlib.colors.LinearSegmentedColormap.from_list('pval_cmap', ['black', 'white'])
 norm = matplotlib.colors.Normalize(vmin=0, vmax=0.05)
 
-# Panel 1: Single trial performance
-ax = axes[0]
-sns.lineplot(data=df_single, x='trial_w', y='outcome_w',
+# Store all stats for saving
+all_stats = {}
+
+# Panel (0,0): Single trial performance, non-realigned
+ax = axes[0, 0]
+sns.lineplot(data=df_non_realigned, x='trial_w', y='outcome_w',
             palette=reward_palette[::-1], hue='reward_group',
             errorbar='ci', err_style='band', ax=ax, legend=False)
 
-# Statistical test for panel 1
-p_values_single = []
-for trial_w in df_single['trial_w'].unique():
-    group_R_plus = df_single[(df_single['trial_w'] == trial_w) & (df_single['reward_group'] == 'R+')]['outcome_w']
-    group_R_minus = df_single[(df_single['trial_w'] == trial_w) & (df_single['reward_group'] == 'R-')]['outcome_w']
+# Statistical test
+p_values = []
+for trial_w in sorted(df_non_realigned['trial_w'].unique()):
+    group_R_plus = df_non_realigned[(df_non_realigned['trial_w'] == trial_w) & (df_non_realigned['reward_group'] == 'R+')]['outcome_w']
+    group_R_minus = df_non_realigned[(df_non_realigned['trial_w'] == trial_w) & (df_non_realigned['reward_group'] == 'R-')]['outcome_w']
     if len(group_R_plus) > 0 and len(group_R_minus) > 0:
         stat, p_value = mannwhitneyu(group_R_plus, group_R_minus, alternative='two-sided')
-        p_values_single.append((trial_w, p_value))
+        p_values.append((trial_w, p_value))
 
 # FDR correction
-trials_single, raw_pvals_single = zip(*p_values_single)
-_, corrected_pvals_single, _, _ = multipletests(raw_pvals_single, alpha=0.05, method='fdr_bh')
-p_values_single = list(zip(trials_single, corrected_pvals_single))
+if p_values:
+    trials, raw_pvals = zip(*p_values)
+    _, corrected_pvals, _, _ = multipletests(raw_pvals, alpha=0.05, method='fdr_bh')
+    p_values = list(zip(trials, corrected_pvals))
+    all_stats['non_realigned_single'] = p_values
 
-# Plot p-value rectangles
-for trial, p_value in p_values_single:
-    color = cmap(norm(min(p_value, 0.05)))
-    ax.add_patch(plt.Rectangle((trial - 0.4, .95), 0.8, 0.03, color=color, edgecolor='none'))
+    # Plot p-value rectangles
+    for trial, p_value in p_values:
+        color = cmap(norm(min(p_value, 0.05)))
+        ax.add_patch(plt.Rectangle((trial - 0.4, 0.95), 0.8, 0.03, color=color, edgecolor='none'))
 
-ax.set_title('Raw trial outcomes')
+ax.set_title('Single trial (non-realigned)')
 ax.set_xlabel('Whisker trial')
 ax.set_ylabel('Hit rate')
 ax.set_ylim([-0.1, 1])
 
-# Panel 2: Fitted learning curves
-ax = axes[1]
-sns.lineplot(data=df_learning, x='trial_w', y='learning_curve_w',
+# Panel (0,1): Fitted learning curve, non-realigned
+ax = axes[0, 1]
+sns.lineplot(data=df_non_realigned, x='trial_w', y='learning_curve_w',
+            palette=reward_palette[::-1], hue='reward_group',
+            errorbar='ci', err_style='band', ax=ax, legend=False)
+
+# Statistical test
+p_values = []
+for trial_w in sorted(df_non_realigned['trial_w'].unique()):
+    group_R_plus = df_non_realigned[(df_non_realigned['trial_w'] == trial_w) & (df_non_realigned['reward_group'] == 'R+')]['learning_curve_w']
+    group_R_minus = df_non_realigned[(df_non_realigned['trial_w'] == trial_w) & (df_non_realigned['reward_group'] == 'R-')]['learning_curve_w']
+    if len(group_R_plus) > 0 and len(group_R_minus) > 0:
+        stat, p_value = mannwhitneyu(group_R_plus, group_R_minus, alternative='two-sided')
+        p_values.append((trial_w, p_value))
+
+# FDR correction
+if p_values:
+    trials, raw_pvals = zip(*p_values)
+    _, corrected_pvals, _, _ = multipletests(raw_pvals, alpha=0.05, method='fdr_bh')
+    p_values = list(zip(trials, corrected_pvals))
+    all_stats['non_realigned_learning'] = p_values
+
+    # Plot p-value rectangles
+    for trial, p_value in p_values:
+        color = cmap(norm(min(p_value, 0.05)))
+        ax.add_patch(plt.Rectangle((trial - 0.4, 0.95), 0.8, 0.03, color=color, edgecolor='none'))
+
+ax.set_title('Fitted learning curve (non-realigned)')
+ax.set_xlabel('Whisker trial')
+ax.set_ylabel('Lick probability')
+ax.set_ylim([-0.1, 1])
+
+# Panel (1,0): Single trial performance, realigned to first hit
+ax = axes[1, 0]
+sns.lineplot(data=df_realigned, x='trial_w_realigned', y='outcome_w',
+            palette=reward_palette[::-1], hue='reward_group',
+            errorbar='ci', err_style='band', ax=ax, legend=False)
+
+# Statistical test
+p_values = []
+for trial_w in sorted(df_realigned['trial_w_realigned'].unique()):
+    group_R_plus = df_realigned[(df_realigned['trial_w_realigned'] == trial_w) & (df_realigned['reward_group'] == 'R+')]['outcome_w']
+    group_R_minus = df_realigned[(df_realigned['trial_w_realigned'] == trial_w) & (df_realigned['reward_group'] == 'R-')]['outcome_w']
+    if len(group_R_plus) > 0 and len(group_R_minus) > 0:
+        stat, p_value = mannwhitneyu(group_R_plus, group_R_minus, alternative='two-sided')
+        p_values.append((trial_w, p_value))
+
+# FDR correction
+if p_values:
+    trials, raw_pvals = zip(*p_values)
+    _, corrected_pvals, _, _ = multipletests(raw_pvals, alpha=0.05, method='fdr_bh')
+    p_values = list(zip(trials, corrected_pvals))
+    all_stats['realigned_single'] = p_values
+
+    # Plot p-value rectangles
+    for trial, p_value in p_values:
+        color = cmap(norm(min(p_value, 0.05)))
+        ax.add_patch(plt.Rectangle((trial - 0.4, 0.95), 0.8, 0.03, color=color, edgecolor='none'))
+
+ax.set_title('Single trial (realigned to first hit)')
+ax.set_xlabel('Whisker trial (from first hit)')
+ax.set_ylabel('Hit rate')
+ax.set_ylim([-0.1, 1])
+
+# Panel (1,1): Fitted learning curve, realigned to first hit
+ax = axes[1, 1]
+sns.lineplot(data=df_realigned, x='trial_w_realigned', y='learning_curve_w',
             palette=reward_palette[::-1], hue='reward_group',
             errorbar='ci', err_style='band', ax=ax)
 
-# Statistical test for panel 3
-p_values_learning = []
-for trial_w in df_learning['trial_w'].unique():
-    group_R_plus = df_learning[(df_learning['trial_w'] == trial_w) & (df_learning['reward_group'] == 'R+')]['learning_curve_w']
-    group_R_minus = df_learning[(df_learning['trial_w'] == trial_w) & (df_learning['reward_group'] == 'R-')]['learning_curve_w']
+# Statistical test
+p_values = []
+for trial_w in sorted(df_realigned['trial_w_realigned'].unique()):
+    group_R_plus = df_realigned[(df_realigned['trial_w_realigned'] == trial_w) & (df_realigned['reward_group'] == 'R+')]['learning_curve_w']
+    group_R_minus = df_realigned[(df_realigned['trial_w_realigned'] == trial_w) & (df_realigned['reward_group'] == 'R-')]['learning_curve_w']
     if len(group_R_plus) > 0 and len(group_R_minus) > 0:
         stat, p_value = mannwhitneyu(group_R_plus, group_R_minus, alternative='two-sided')
-        p_values_learning.append((trial_w, p_value))
+        p_values.append((trial_w, p_value))
 
 # FDR correction
-trials_learning, raw_pvals_learning = zip(*p_values_learning)
-_, corrected_pvals_learning, _, _ = multipletests(raw_pvals_learning, alpha=0.05, method='fdr_bh')
-p_values_learning = list(zip(trials_learning, corrected_pvals_learning))
+if p_values:
+    trials, raw_pvals = zip(*p_values)
+    _, corrected_pvals, _, _ = multipletests(raw_pvals, alpha=0.05, method='fdr_bh')
+    p_values = list(zip(trials, corrected_pvals))
+    all_stats['realigned_learning'] = p_values
 
-# Plot p-value rectangles
-for trial, p_value in p_values_learning:
-    color = cmap(norm(min(p_value, 0.05)))
-    ax.add_patch(plt.Rectangle((trial - 0.4, .95), 0.8, 0.03, color=color, edgecolor='none'))
+    # Plot p-value rectangles
+    for trial, p_value in p_values:
+        color = cmap(norm(min(p_value, 0.05)))
+        ax.add_patch(plt.Rectangle((trial - 0.4, 0.95), 0.8, 0.03, color=color, edgecolor='none'))
 
-ax.set_title('Fitted learning curves')
-ax.set_xlabel('Whisker trial')
+ax.set_title('Fitted learning curve (realigned to first hit)')
+ax.set_xlabel('Whisker trial (from first hit)')
+ax.set_ylabel('Lick probability')
 ax.set_ylim([-0.1, 1])
 ax.legend(frameon=False, title='Reward group')
 
@@ -794,17 +828,21 @@ plt.tight_layout()
 
 # Save the figure
 output_dir = io.adjust_path_to_host(r'/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/behavior')
-output_file = os.path.join(output_dir, f'performance_D0_comparison_aligned_whisker_trial.svg')
+output_file = os.path.join(output_dir, 'performance_D0_comparison_2x2.svg')
 plt.savefig(output_file, format='svg', dpi=300)
 
-# Save all data and p-values
-df_single.to_csv(os.path.join(output_dir, 'performance_D0_single_trial_data.csv'), index=False)
-pd.DataFrame(p_values_single, columns=['trial_w', 'p_value']).to_csv(
-    os.path.join(output_dir, 'performance_D0_single_trial_stats.csv'), index=False)
+# Save all data and statistics
+df_non_realigned.to_csv(os.path.join(output_dir, 'performance_D0_non_realigned_data.csv'), index=False)
+df_realigned.to_csv(os.path.join(output_dir, 'performance_D0_realigned_data.csv'), index=False)
 
-df_learning.to_csv(os.path.join(output_dir, 'performance_D0_learning_curve_data.csv'), index=False)
-pd.DataFrame(p_values_learning, columns=['trial_w', 'p_value']).to_csv(
-    os.path.join(output_dir, 'performance_D0_learning_curve_stats.csv'), index=False)
+# Save all p-values
+for key, pvals in all_stats.items():
+    pd.DataFrame(pvals, columns=['trial_w', 'p_value']).to_csv(
+        os.path.join(output_dir, f'performance_D0_{key}_stats.csv'), index=False)
+
+
+
+
 
 
 # ############################################################

@@ -302,16 +302,16 @@ def compute_within_day_correlations(corr_matrices, days, n_map_trials):
 
     return pd.DataFrame(results)
 
-def compute_day2_vs_all_days(corr_matrices, days, n_map_trials):
+def compute_day0_vs_all_days(corr_matrices, days, n_map_trials):
     """
-    Compute average correlation between day +2 and each other day.
+    Compute average correlation between day 0 and each other day.
 
     Returns per-mouse:
-    - corr_day2_vs_day-2: average correlation between day +2 and day -2
-    - corr_day2_vs_day-1: average correlation between day +2 and day -1
-    - corr_day2_vs_day0: average correlation between day +2 and day 0
-    - corr_day2_vs_day1: average correlation between day +2 and day +1
-    - corr_day2_vs_day2: average correlation within day +2
+    - corr_day0_vs_day-2: average correlation between day 0 and day -2
+    - corr_day0_vs_day-1: average correlation between day 0 and day -1
+    - corr_day0_vs_day0: average correlation within day 0
+    - corr_day0_vs_day1: average correlation between day 0 and day +1
+    - corr_day0_vs_day2: average correlation between day 0 and day +2
     """
 
     results = []
@@ -319,17 +319,17 @@ def compute_day2_vs_all_days(corr_matrices, days, n_map_trials):
     for cm in corr_matrices:
         # Define trial indices for each day
         # Days: -2, -1, 0, 1, 2
-        day2_idx = np.arange(4 * n_map_trials, 5 * n_map_trials)  # Day +2 (indices 160-199)
+        day0_idx = np.arange(2 * n_map_trials, 3 * n_map_trials)  # Day 0 (indices 80-119)
 
         day_correlations = {}
         for i, day in enumerate(days):
             day_idx = np.arange(i * n_map_trials, (i + 1) * n_map_trials)
 
-            # Correlation between day +2 and current day
-            corr_block = cm[np.ix_(day2_idx, day_idx)]
+            # Correlation between day 0 and current day
+            corr_block = cm[np.ix_(day0_idx, day_idx)]
             avg_corr = np.nanmean(corr_block)
 
-            day_correlations[f'corr_day2_vs_day{day:+d}'] = avg_corr
+            day_correlations[f'corr_day0_vs_day{day:+d}'] = avg_corr
 
         results.append(day_correlations)
 
@@ -392,16 +392,16 @@ within_day_metrics_nonrew['mouse_id'] = mice_nonrew
 
 within_day_metrics_combined = pd.concat([within_day_metrics_rew, within_day_metrics_nonrew], ignore_index=True)
 
-# Compute day +2 vs all days metrics
-day2_metrics_rew = compute_day2_vs_all_days(corr_matrices_rew, days, n_map_trials)
-day2_metrics_rew['reward_group'] = 'R+'
-day2_metrics_rew['mouse_id'] = mice_rew
+# Compute day 0 vs all days metrics
+day0_metrics_rew = compute_day0_vs_all_days(corr_matrices_rew, days, n_map_trials)
+day0_metrics_rew['reward_group'] = 'R+'
+day0_metrics_rew['mouse_id'] = mice_rew
 
-day2_metrics_nonrew = compute_day2_vs_all_days(corr_matrices_nonrew, days, n_map_trials)
-day2_metrics_nonrew['reward_group'] = 'R-'
-day2_metrics_nonrew['mouse_id'] = mice_nonrew
+day0_metrics_nonrew = compute_day0_vs_all_days(corr_matrices_nonrew, days, n_map_trials)
+day0_metrics_nonrew['reward_group'] = 'R-'
+day0_metrics_nonrew['mouse_id'] = mice_nonrew
 
-day2_metrics_combined = pd.concat([day2_metrics_rew, day2_metrics_nonrew], ignore_index=True)
+day0_metrics_combined = pd.concat([day0_metrics_rew, day0_metrics_nonrew], ignore_index=True)
 
 # Compute metrics for both groups
 metrics_rew = compute_network_metrics(corr_matrices_rew, days, n_map_trials)
@@ -439,28 +439,39 @@ for day in days:
     within_day_stats_dict[day] = p_value
     print(f"Day {day:+2d}: U={stat:.1f}, p={p_value:.4f} {'***' if p_value < 0.001 else '**' if p_value < 0.01 else '*' if p_value < 0.05 else 'n.s.'}")
 
-# Print summary statistics for day +2 trajectory
+# Print summary statistics for day 0 trajectory
 print("\n" + "="*60)
-print("DAY +2 CORRELATION TRAJECTORY")
+print("DAY 0 CORRELATION TRAJECTORY")
 print("="*60)
 for group in ['R+', 'R-']:
-    data = day2_metrics_combined[day2_metrics_combined['reward_group'] == group]
+    data = day0_metrics_combined[day0_metrics_combined['reward_group'] == group]
     print(f"\n{group} Group (N={len(data)}):")
     for day in days:
-        col_name = f'corr_day2_vs_day{day:+d}'
-        print(f"  Day +2 vs Day {day:+2d}:        {data[col_name].mean():.3f} ± {data[col_name].std():.3f}")
+        col_name = f'corr_day0_vs_day{day:+d}'
+        print(f"  Day 0 vs Day {day:+2d}:         {data[col_name].mean():.3f} ± {data[col_name].std():.3f}")
 
-# Statistical comparison between groups for day +2 trajectory
+# Statistical comparison within groups: each day vs day 0 (Wilcoxon signed-rank test)
 print("\n" + "-"*60)
-print("STATISTICAL COMPARISONS - Day +2 trajectory (Mann-Whitney U test)")
+print("STATISTICAL COMPARISONS - Day 0 trajectory (Wilcoxon signed-rank test)")
+print("Each day vs Day 0, within each reward group")
 print("-"*60)
 
-for day in days:
-    col_name = f'corr_day2_vs_day{day:+d}'
-    r_plus = day2_metrics_rew[col_name].dropna()
-    r_minus = day2_metrics_nonrew[col_name].dropna()
-    stat, p_value = mannwhitneyu(r_plus, r_minus, alternative='two-sided')
-    print(f"Day {day:+2d}: U={stat:.1f}, p={p_value:.4f} {'***' if p_value < 0.001 else '**' if p_value < 0.01 else '*' if p_value < 0.05 else 'n.s.'}")
+# Store stats for plotting
+day0_trajectory_stats_dict = {'R+': {}, 'R-': {}}
+
+for group, df in [('R+', day0_metrics_rew), ('R-', day0_metrics_nonrew)]:
+    print(f"\n{group} Group:")
+    day0_col = 'corr_day0_vs_day+0'
+    day0_vals = df[day0_col].dropna().values
+
+    for day in days:
+        if day == 0:
+            continue  # Skip comparison with itself
+        col_name = f'corr_day0_vs_day{day:+d}'
+        day_vals = df[col_name].dropna().values
+        stat, p_value = wilcoxon(day_vals, day0_vals, alternative='two-sided')
+        day0_trajectory_stats_dict[group][day] = p_value
+        print(f"  Day {day:+2d} vs Day 0: W={stat:.1f}, p={p_value:.4f} {'***' if p_value < 0.001 else '**' if p_value < 0.01 else '*' if p_value < 0.05 else 'n.s.'}")
 
 # Print summary statistics
 print("\n" + "="*60)
@@ -547,64 +558,72 @@ svg_file1 = f'network_within_day_{similarity_metric}_ctype_{projection_type}_{ce
 plt.savefig(os.path.join(output_dir, svg_file1), format='svg', dpi=300)
 plt.savefig(os.path.join(output_dir, svg_file1.replace('.svg', '.png')), format='png', dpi=300)
 
-# Figure 2: Day +2 correlation trajectory across days
+# Figure 2: Day 0 correlation trajectory across days
 fig2, ax2 = plt.subplots(1, 1, figsize=(6, 5))
 
 # Reshape data for plotting
-day2_long = day2_metrics_combined.melt(
+day0_long = day0_metrics_combined.melt(
     id_vars=['mouse_id', 'reward_group'],
-    value_vars=[f'corr_day2_vs_day{d:+d}' for d in days],
+    value_vars=[f'corr_day0_vs_day{d:+d}' for d in days],
     var_name='reference_day', value_name='correlation'
 )
 # Extract day number from variable name
-day2_long['day'] = day2_long['reference_day'].str.extract(r'day([+-]?\d+)').astype(int)
+day0_long['day'] = day0_long['reference_day'].str.extract(r'day([+-]?\d+)').astype(int)
 
 # Plot average trajectory with pointplot
-sns.pointplot(data=day2_long, x='reference_day', y='correlation', hue='reward_group',
+sns.pointplot(data=day0_long, x='reference_day', y='correlation', hue='reward_group',
               palette=reward_palette[::-1], ax=ax2, errorbar='ci', markers='o',
               linestyles='-', markersize=8, linewidth=2)
 
 # Add individual mouse lines
-for mouse_id in day2_metrics_combined['mouse_id'].unique():
-    mouse_data = day2_long[day2_long['mouse_id'] == mouse_id]
+for mouse_id in day0_metrics_combined['mouse_id'].unique():
+    mouse_data = day0_long[day0_long['mouse_id'] == mouse_id]
     reward_group = mouse_data['reward_group'].iloc[0]
     color = reward_palette[1] if reward_group == 'R+' else reward_palette[0]
     ax2.plot(range(len(days)), mouse_data.sort_values('day')['correlation'].values,
              color=color, alpha=0.3, linewidth=0.8, zorder=1)
 
-# Statistical comparisons between groups for each day
-day2_stats_dict = {}
-for day in days:
-    col_name = f'corr_day2_vs_day{day:+d}'
-    r_plus = day2_metrics_rew[col_name].dropna()
-    r_minus = day2_metrics_nonrew[col_name].dropna()
-    stat, p_value = mannwhitneyu(r_plus, r_minus, alternative='two-sided')
-    day2_stats_dict[day] = p_value
+# Statistical comparison: Day -2 vs Day +2 for each reward group
+print("\n" + "-"*60)
+print("STATISTICAL COMPARISONS - Day -2 vs Day +2 (Wilcoxon signed-rank test)")
+print("-"*60)
 
-    # Add p-value text
-    day_idx = days.index(day)
-    y_pos = 0.28
+day_neg2_vs_pos2_stats = {}
+for group, df in [('R+', day0_metrics_rew), ('R-', day0_metrics_nonrew)]:
+    day_neg2 = df['corr_day0_vs_day-2'].dropna().values
+    day_pos2 = df['corr_day0_vs_day+2'].dropna().values
+    stat, p_value = wilcoxon(day_neg2, day_pos2, alternative='two-sided')
+    day_neg2_vs_pos2_stats[group] = p_value
+    print(f"{group}: W={stat:.1f}, p={p_value:.4f} {'***' if p_value < 0.001 else '**' if p_value < 0.01 else '*' if p_value < 0.05 else 'n.s.'}")
+
+# Display stats on plot for Day -2 vs Day +2 comparison
+y_text_base = 0.27
+for idx, (group, p_value) in enumerate(day_neg2_vs_pos2_stats.items()):
     if p_value < 0.001:
-        p_text = '***'
+        p_text = f'{group}: ***'
     elif p_value < 0.01:
-        p_text = '**'
+        p_text = f'{group}: **'
     elif p_value < 0.05:
-        p_text = '*'
+        p_text = f'{group}: *'
     else:
-        p_text = 'n.s.'
-    ax2.text(day_idx, y_pos, p_text, ha='center', va='bottom', fontsize=9)
+        p_text = f'{group}: n.s.'
+
+    y_offset = idx * 0.015
+    ax2.text(0.98, y_text_base - y_offset, p_text, transform=ax2.transAxes,
+             ha='right', va='top', fontsize=9,
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
 
 ax2.set_ylim(0, 0.3)
 ax2.set_xlabel('Day')
-ax2.set_ylabel('Correlation with Day +2')
-ax2.set_title('Day +2 Network Similarity Across Days')
+ax2.set_ylabel('Correlation with Day 0')
+ax2.set_title('Day 0 Network Similarity Across Days')
 ax2.legend(title='Group')
 ax2.set_xticklabels(days)
 
 sns.despine()
 plt.tight_layout()
 
-svg_file2 = f'network_day2_trajectory_{similarity_metric}_ctype_{projection_type}_{celltype_str}{zscore_str}.svg'
+svg_file2 = f'network_day0_trajectory_{similarity_metric}_ctype_{projection_type}_{celltype_str}{zscore_str}.svg'
 plt.savefig(os.path.join(output_dir, svg_file2), format='svg', dpi=300)
 plt.savefig(os.path.join(output_dir, svg_file2.replace('.svg', '.png')), format='png', dpi=300)
 
@@ -646,7 +665,7 @@ plt.savefig(os.path.join(output_dir, svg_file3.replace('.svg', '.png')), format=
 
 # Save data
 within_day_metrics_combined.to_csv(os.path.join(output_dir, f'network_within_day_{similarity_metric}_ctype_{projection_type}_{celltype_str}{zscore_str}.csv'), index=False)
-day2_metrics_combined.to_csv(os.path.join(output_dir, f'network_day2_trajectory_{similarity_metric}_ctype_{projection_type}_{celltype_str}{zscore_str}.csv'), index=False)
+day0_metrics_combined.to_csv(os.path.join(output_dir, f'network_day0_trajectory_{similarity_metric}_ctype_{projection_type}_{celltype_str}{zscore_str}.csv'), index=False)
 metrics_combined.to_csv(os.path.join(output_dir, f'network_reorganization_metrics_{similarity_metric}_ctype_{projection_type}_{celltype_str}{zscore_str}.csv'), index=False)
 
 # Save statistical results for within-day correlations
@@ -665,21 +684,43 @@ for day in days:
 within_day_stats_df = pd.DataFrame(within_day_stats_results)
 within_day_stats_df.to_csv(os.path.join(output_dir, f'network_within_day_stats_{similarity_metric}_ctype_{projection_type}_{celltype_str}{zscore_str}.csv'), index=False)
 
-# Save statistical results for day +2 trajectory
-day2_stats_results = []
-for day in days:
-    col_name = f'corr_day2_vs_day{day:+d}'
-    r_plus = day2_metrics_rew[col_name].dropna()
-    r_minus = day2_metrics_nonrew[col_name].dropna()
-    stat, p_value = mannwhitneyu(r_plus, r_minus, alternative='two-sided')
-    day2_stats_results.append({
-        'comparison_day': day,
-        'metric': col_name,
-        'U_statistic': stat,
+# Save statistical results for day 0 trajectory (within-group comparisons)
+day0_stats_results = []
+
+# Within-group comparisons: each day vs day 0
+for group, df in [('R+', day0_metrics_rew), ('R-', day0_metrics_nonrew)]:
+    day0_col = 'corr_day0_vs_day+0'
+    day0_vals = df[day0_col].dropna().values
+
+    for day in days:
+        if day == 0:
+            continue
+        col_name = f'corr_day0_vs_day{day:+d}'
+        day_vals = df[col_name].dropna().values
+        stat, p_value = wilcoxon(day_vals, day0_vals, alternative='two-sided')
+        day0_stats_results.append({
+            'reward_group': group,
+            'comparison': f'day{day:+d}_vs_day0',
+            'test': 'Wilcoxon signed-rank',
+            'statistic': stat,
+            'p_value': p_value
+        })
+
+# Day -2 vs Day +2 comparison for each group
+for group, df in [('R+', day0_metrics_rew), ('R-', day0_metrics_nonrew)]:
+    day_neg2 = df['corr_day0_vs_day-2'].dropna().values
+    day_pos2 = df['corr_day0_vs_day+2'].dropna().values
+    stat, p_value = wilcoxon(day_neg2, day_pos2, alternative='two-sided')
+    day0_stats_results.append({
+        'reward_group': group,
+        'comparison': 'day-2_vs_day+2',
+        'test': 'Wilcoxon signed-rank',
+        'statistic': stat,
         'p_value': p_value
     })
-day2_stats_df = pd.DataFrame(day2_stats_results)
-day2_stats_df.to_csv(os.path.join(output_dir, f'network_day2_trajectory_stats_{similarity_metric}_ctype_{projection_type}_{celltype_str}{zscore_str}.csv'), index=False)
+
+day0_stats_df = pd.DataFrame(day0_stats_results)
+day0_stats_df.to_csv(os.path.join(output_dir, f'network_day0_trajectory_stats_{similarity_metric}_ctype_{projection_type}_{celltype_str}{zscore_str}.csv'), index=False)
 
 # Save statistical results for reorganization metrics
 stats_results = []
