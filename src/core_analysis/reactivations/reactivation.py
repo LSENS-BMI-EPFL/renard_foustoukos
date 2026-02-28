@@ -36,8 +36,8 @@ days_str = ['-2', '-1', '0', '+1', '+2']
 n_map_trials = 40  # Number of mapping trials to use
 
 # Template and event detection parameters
-use_surrogate_thresholds = True  # Set to False to force use of threshold_corr even when surrogate file exists
-percentile_to_use = 95  # Which percentile threshold CSV to load: 95, 99, or 99.9 (only used if use_surrogate_thresholds=True)
+use_surrogate_thresholds = 'mouse'  # None (fixed threshold_corr), 'day' (per-mouse-day CSV), 'mouse' (per-mouse CSV)
+percentile_to_use = 99  # Which percentile threshold CSV to load: 95, 99, or 99.9
 threshold_dff = None  # 5% dff threshold for including cells in template (use None for all cells)
 threshold_corr = 0.45  # Default correlation threshold for event detection (if no surrogate thresholds available OR use_surrogate_thresholds=False)
 min_event_distance_ms = 150  # Minimum distance between events (ms)
@@ -45,13 +45,11 @@ min_event_distance_frames = int(min_event_distance_ms / 1000 * sampling_rate)
 prominence = 0.15  # Minimum prominence of peaks for event detection (vertical distance to contour line)
 
 # NOTE: Surrogate-based thresholds
-# If reactivation_surrogates_per_day.py has been run, the script will automatically load
-# and use per-day percentile-based thresholds instead of the fixed threshold_corr value.
-#
-# percentile_to_use options:
-#   - 95: Liberal threshold (more events detected)
-#   - 99: Balanced threshold (recommended)
-#   - 99.9: Conservative threshold (fewer false positives)
+# use_surrogate_thresholds options:
+#   - None     : fixed threshold_corr for all mice/days
+#   - 'day'    : per-mouse-per-day threshold from reactivation_surrogates_per_day.py
+#   - 'mouse'  : single per-mouse threshold from reactivation_surrogate_by_mouse.py
+# percentile_to_use options: 95 (liberal), 99 (recommended), 99.9 (conservative)
 #   Note: Automatically selects the corresponding CSV file (e.g., _p95.csv, _p99.csv, _p999.csv)
 
 # Visualization parameters
@@ -61,7 +59,7 @@ time_per_row = 200  # seconds per row in correlation trace plots (rows calculate
 trial_type = 'no_stim'
 
 # Analysis mode
-mode = 'analyze'  # Options: 'compute' (run analysis and save results) or 'analyze' (load results and generate plots)
+mode = 'compute'  # Options: 'compute' (run analysis and save results) or 'analyze' (load results and generate plots)
 
 # Parallel processing parameters
 n_jobs = 35  # Number of parallel jobs for processing mice (set to -1 to use all available cores)
@@ -94,64 +92,78 @@ print(f"Found {len(r_minus_mice)} R- mice: {r_minus_mice}")
 # THRESHOLD LOADING FUNCTIONS
 # ============================================================================
 
+def _get_surrogate_csv_path(mode):
+    """
+    Return the base CSV path for surrogate thresholds based on use_surrogate_thresholds mode.
+
+    Parameters
+    ----------
+    mode : str or None
+        'day' → per-mouse-per-day CSV (reactivation_surrogates_per_day.py)
+        'mouse' → single per-mouse CSV (reactivation_surrogate_by_mouse.py)
+        None → returns None (fixed threshold used)
+    """
+    if mode == 'day':
+        return os.path.join(io.results_dir, 'reactivation_surrogates_per_day',
+                            'surrogate_thresholds_per_day.csv')
+    elif mode == 'mouse':
+        return os.path.join(io.results_dir, 'reactivation_surrogates_per_mouse',
+                            'surrogate_thresholds_per_mouse.csv')
+    return None
+
+
 def load_surrogate_thresholds(surrogate_csv_path, percentile=99):
     """
-    Load per-day percentile-based thresholds from surrogate analysis.
+    Load percentile-based thresholds from surrogate analysis.
+
+    Handles both per-day CSVs (mouse_id + day columns) and per-mouse CSVs
+    (mouse_id only). In the per-mouse case the same threshold is applied to
+    all days for that mouse.
 
     Parameters
     ----------
     surrogate_csv_path : str
-        Path to surrogate threshold CSV file. Can be either:
-        - Full path including percentile suffix (e.g., 'path/thresholds_p99.csv')
-        - Base path without suffix (e.g., 'path/thresholds.csv'), will auto-append percentile
+        Base path to CSV. Percentile suffix (_p99, etc.) is appended automatically
+        unless the path already contains it.
     percentile : float
-        Which percentile threshold to load: 95, 99, or 99.9 (default: 99)
-        This will load the corresponding CSV file (e.g., p95, p99, p999)
+        Which percentile to load: 95, 99, or 99.9 (default: 99)
 
     Returns
     -------
     threshold_dict : dict
-        {mouse_id: {day: threshold_value}} - separate threshold per mouse-day combination
+        {mouse_id: {day: threshold_value}}
     """
-    # Construct the correct filename based on percentile
-    # Check if path already has percentile suffix
+    # Build final filename with percentile suffix
     if '_p95.csv' in surrogate_csv_path or '_p99.csv' in surrogate_csv_path or '_p999.csv' in surrogate_csv_path:
-        # Path already has percentile suffix, use as-is
         final_path = surrogate_csv_path
     else:
-        # Insert percentile suffix before .csv
-        # Convert percentile to string: 95 -> p95, 99 -> p99, 99.9 -> p999
-        if percentile == int(percentile):
-            p_str = f"p{int(percentile)}"
-        else:
-            p_str = f"p{int(percentile * 10)}"
-
-        # Insert suffix before .csv
-        if surrogate_csv_path.endswith('.csv'):
-            final_path = surrogate_csv_path[:-4] + f'_{p_str}.csv'
-        else:
-            final_path = surrogate_csv_path + f'_{p_str}.csv'
+        p_str = f"p{int(percentile)}" if percentile == int(percentile) else f"p{int(percentile * 10)}"
+        final_path = (surrogate_csv_path[:-4] + f'_{p_str}.csv'
+                      if surrogate_csv_path.endswith('.csv')
+                      else surrogate_csv_path + f'_{p_str}.csv')
 
     if not os.path.exists(final_path):
         raise FileNotFoundError(f"Surrogate threshold file not found: {final_path}\n"
-                                f"Available percentiles: 95, 99, 99.9\n"
-                                f"Looking for: {final_path}")
+                                f"Available percentiles: 95, 99, 99.9")
 
     df = pd.read_csv(final_path)
+    threshold_col = 'threshold_percentile_median'
+    all_days = [-2, -1, 0, 1, 2]
 
-    # Always use percentile-based threshold column
-    threshold_col = 'threshold_percentile_mean'
-
-    # Build dictionary with per-day thresholds
     threshold_dict = {}
-    for _, row in df.iterrows():
-        mouse = row['mouse_id']
-        day = int(row['day'])
-        threshold = row[threshold_col]
-
-        if mouse not in threshold_dict:
-            threshold_dict[mouse] = {}
-        threshold_dict[mouse][day] = threshold
+    if 'day' in df.columns:
+        # Per-day format: one row per mouse-day
+        for _, row in df.iterrows():
+            mouse = row['mouse_id']
+            day = int(row['day'])
+            if mouse not in threshold_dict:
+                threshold_dict[mouse] = {}
+            threshold_dict[mouse][day] = row[threshold_col]
+    else:
+        # Per-mouse format: one row per mouse, same threshold applied to all days
+        for _, row in df.iterrows():
+            mouse = row['mouse_id']
+            threshold_dict[mouse] = {d: row[threshold_col] for d in all_days}
 
     return threshold_dict
 
@@ -1032,6 +1044,150 @@ def plot_percent_time_above_per_day(r_plus_results, r_minus_results, save_path):
         print(f"  Stats CSV saved: {stats_csv}")
 
 
+def plot_mean_correlation_per_day(r_plus_results, r_minus_results, save_path):
+    """
+    Compare R+ vs R- mean template correlation per day (single-panel grouped bar chart).
+
+    Computes the mean of the frame-by-frame correlation trace per mouse per day
+    and tests the difference between reward groups with Mann-Whitney U.
+
+    Parameters
+    ----------
+    r_plus_results : dict
+        {mouse_id: results} from analyze_mouse_reactivation() for R+ mice
+    r_minus_results : dict
+        {mouse_id: results} from analyze_mouse_reactivation() for R- mice
+    save_path : str
+        Path to save SVG file
+    """
+    data_list = []
+    for mouse, results in r_plus_results.items():
+        for day in days:
+            if day in results['days']:
+                corr = results['days'][day].get('correlations')
+                if corr is not None and len(corr) > 0:
+                    data_list.append({'Day': day, 'MeanCorr': float(np.nanmean(corr)),
+                                      'Group': 'R+', 'Mouse': mouse})
+    for mouse, results in r_minus_results.items():
+        for day in days:
+            if day in results['days']:
+                corr = results['days'][day].get('correlations')
+                if corr is not None and len(corr) > 0:
+                    data_list.append({'Day': day, 'MeanCorr': float(np.nanmean(corr)),
+                                      'Group': 'R-', 'Mouse': mouse})
+
+    df = pd.DataFrame(data_list)
+
+    # Per-day Mann-Whitney U R+ vs R-
+    days_list = sorted(days)
+    r_plus_by_day  = {day: df[(df['Day'] == day) & (df['Group'] == 'R+')]['MeanCorr'].values for day in days_list}
+    r_minus_by_day = {day: df[(df['Day'] == day) & (df['Group'] == 'R-')]['MeanCorr'].values for day in days_list}
+
+    p_values = []
+    for day in days_list:
+        rp, rm = r_plus_by_day[day], r_minus_by_day[day]
+        if len(rp) > 0 and len(rm) > 0:
+            try:
+                _, p = mannwhitneyu(rp, rm, alternative='two-sided')
+            except Exception:
+                p = 1.0
+        else:
+            p = 1.0
+        p_values.append(p)
+
+    # Pad missing days for plotting
+    for day in days_list:
+        if day not in df['Day'].unique():
+            df = pd.concat([df, pd.DataFrame({'Day': [day], 'MeanCorr': [np.nan], 'Group': ['R+'], 'Mouse': ['']})], ignore_index=True)
+            df = pd.concat([df, pd.DataFrame({'Day': [day], 'MeanCorr': [np.nan], 'Group': ['R-'], 'Mouse': ['']})], ignore_index=True)
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 7))
+
+    sns.barplot(data=df, x='Day', y='MeanCorr', hue='Group',
+                errorbar=('ci', 95),
+                palette={'R+': reward_palette[1], 'R-': reward_palette[0]},
+                hue_order=['R+', 'R-'],
+                alpha=0.7, edgecolor='black', ax=ax)
+
+    # Individual mouse trajectories
+    x_positions = {day: idx for idx, day in enumerate(days_list)}
+    bar_width = 0.35
+    group_offsets = {'R+': -bar_width / 2, 'R-': bar_width / 2}
+    for mouse in df['Mouse'].unique():
+        if mouse == '':
+            continue
+        mdata = df[df['Mouse'] == mouse].sort_values('Day')
+        group = mdata['Group'].iloc[0]
+        mx = [x_positions[d] + group_offsets[group] for d in mdata['Day']]
+        my = mdata['MeanCorr'].values
+        ax.plot(mx, my, '-', color=reward_palette[1] if group == 'R+' else reward_palette[0],
+                linewidth=0.8, alpha=0.5, zorder=5)
+
+    # Significance brackets
+    def get_stars(p):
+        if p < 0.001: return '***'
+        elif p < 0.01: return '**'
+        elif p < 0.05: return '*'
+        return 'ns'
+
+    y_max = df['MeanCorr'].max()
+    y_range = y_max if y_max > 0 else 1
+    width = 0.35
+    for day_idx, p_val in enumerate(p_values):
+        stars = get_stars(p_val)
+        if stars != 'ns':
+            rp = df[(df['Day'] == days_list[day_idx]) & (df['Group'] == 'R+') & (df['Mouse'] != '')]['MeanCorr']
+            rm = df[(df['Day'] == days_list[day_idx]) & (df['Group'] == 'R-') & (df['Mouse'] != '')]['MeanCorr']
+            rp_top = rp.mean() + 1.96 * rp.std() / np.sqrt(len(rp)) if len(rp) > 0 else 0
+            rm_top = rm.mean() + 1.96 * rm.std() / np.sqrt(len(rm)) if len(rm) > 0 else 0
+            y1 = max(rp_top, rm_top)
+            y2 = y1 + y_range * 0.05
+            x1, x2 = day_idx - width / 2, day_idx + width / 2
+            ax.plot([x1, x1, x2, x2], [y1, y2, y2, y1], 'k-', linewidth=1)
+            ax.text((x1 + x2) / 2, y2, stars, ha='center', va='bottom', fontsize=12, fontweight='bold')
+
+    ax.set_xlabel('Day', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Mean Template Correlation', fontsize=12, fontweight='bold')
+    ax.set_title('R+ vs R- Mean Template Correlation Per Day\n' +
+                 f'(R+: n={len(r_plus_results)} mice, R-: n={len(r_minus_results)} mice)',
+                 fontsize=13, fontweight='bold')
+    ax.legend(fontsize=11, loc='upper left')
+    ax.grid(True, alpha=0.3, axis='y')
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, format='svg', dpi=300, bbox_inches='tight')
+        print(f"  SVG saved: {save_path}")
+        plt.close()
+
+        # Data CSV
+        data_csv = save_path.replace('.svg', '_data.csv')
+        df[df['Mouse'] != ''].to_csv(data_csv, index=False)
+        print(f"  Data CSV saved: {data_csv}")
+
+        # Stats CSV
+        stats_list = []
+        for day_idx, day in enumerate(days_list):
+            p_val = p_values[day_idx]
+            rp = df[(df['Day'] == day) & (df['Group'] == 'R+') & (df['Mouse'] != '')]['MeanCorr']
+            rm = df[(df['Day'] == day) & (df['Group'] == 'R-') & (df['Mouse'] != '')]['MeanCorr']
+            stats_list.append({
+                'day': day,
+                'r_plus_mean': rp.mean() if len(rp) > 0 else np.nan,
+                'r_plus_sem': rp.std() / np.sqrt(len(rp)) if len(rp) > 0 else np.nan,
+                'r_plus_n': len(rp),
+                'r_minus_mean': rm.mean() if len(rm) > 0 else np.nan,
+                'r_minus_sem': rm.std() / np.sqrt(len(rm)) if len(rm) > 0 else np.nan,
+                'r_minus_n': len(rm),
+                'mann_whitney_p': p_val,
+                'significance': get_stars(p_val),
+            })
+        stats_csv = save_path.replace('.svg', '_stats.csv')
+        pd.DataFrame(stats_list).to_csv(stats_csv, index=False)
+        print(f"  Stats CSV saved: {stats_csv}")
+
+
 def compute_reactivation_frequency_per_trial(selected_trials, template, threshold,
                                               time_bin_ms=500, sampling_rate=30,
                                               min_distance=15, prominence=0.1):
@@ -1141,7 +1297,7 @@ def plot_threshold_comparison(save_path):
 
     # Load mouse-wise thresholds
     mouse_csv_path = os.path.join(io.results_dir, 'reactivation_surrogates', 'surrogate_thresholds.csv')
-    day_csv_path = os.path.join(io.results_dir, 'reactivation_surrogates_per_day', 'surrogate_thresholds_per_day.csv')
+    day_csv_path = _get_surrogate_csv_path('day')
 
     has_mouse_data = os.path.exists(mouse_csv_path)
     has_day_data = os.path.exists(day_csv_path)
@@ -1206,7 +1362,7 @@ def plot_threshold_comparison(save_path):
             mice = df_day['mouse_id'].unique()
             for mouse in mice:
                 mouse_data = df_day[df_day['mouse_id'] == mouse].sort_values('day')
-                ax1.plot(mouse_data['day'], mouse_data['threshold_percentile_mean'],
+                ax1.plot(mouse_data['day'], mouse_data['threshold_percentile_median'],
                         marker='o', alpha=0.6, linewidth=1.5, label=mouse)
 
             ax1.set_xlabel('Day', fontsize=12, fontweight='bold')
@@ -1216,7 +1372,7 @@ def plot_threshold_comparison(save_path):
             ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8, ncol=2)
 
             # Plot 2: Mean ± SEM across mice
-            day_summary = df_day.groupby('day')['threshold_percentile_mean'].agg(['mean', 'sem']).reset_index()
+            day_summary = df_day.groupby('day')['threshold_percentile_median'].agg(['mean', 'sem']).reset_index()
 
             ax2.errorbar(day_summary['day'], day_summary['mean'],
                         yerr=day_summary['sem'], marker='o', markersize=8,
@@ -1228,7 +1384,7 @@ def plot_threshold_comparison(save_path):
                            alpha=0.3, color='steelblue')
 
             ax2.set_xlabel('Day', fontsize=12, fontweight='bold')
-            ax2.set_ylabel('Correlation Threshold (FWER-corrected)', fontsize=12, fontweight='bold')
+            ax2.set_ylabel('Correlation Threshold (Percentile-based)', fontsize=12, fontweight='bold')
             ax2.set_title('Day-Wise Thresholds: Mean ± SEM', fontsize=14, fontweight='bold')
             ax2.grid(True, alpha=0.3)
 
@@ -2821,11 +2977,11 @@ def analyze_reactivation_around_first_hit(mouse, verbose=False):
             print(f"  Warning: Could not create template for {mouse}: {e}")
         return None
 
-    # Load per-day surrogate thresholds if available
-    surrogate_csv_path = os.path.join(io.results_dir, 'reactivation_surrogates_per_day', 'surrogate_thresholds_per_day.csv')
+    # Load surrogate thresholds if available
+    surrogate_csv_path = _get_surrogate_csv_path(use_surrogate_thresholds)
 
     threshold_dict = None
-    if use_surrogate_thresholds and os.path.exists(surrogate_csv_path):
+    if surrogate_csv_path is not None and os.path.exists(surrogate_csv_path):
         try:
             threshold_dict = load_surrogate_thresholds(surrogate_csv_path, percentile=percentile_to_use)
         except:
@@ -2945,11 +3101,11 @@ def analyze_reactivation_trial_by_trial(mouse, n_trials_after_hit=60):
     except:
         return None
 
-    # Load per-day surrogate thresholds if available
-    surrogate_csv_path = os.path.join(io.results_dir, 'reactivation_surrogates_per_day', 'surrogate_thresholds_per_day.csv')
+    # Load surrogate thresholds if available
+    surrogate_csv_path = _get_surrogate_csv_path(use_surrogate_thresholds)
 
     threshold_dict = None
-    if use_surrogate_thresholds and os.path.exists(surrogate_csv_path):
+    if surrogate_csv_path is not None and os.path.exists(surrogate_csv_path):
         try:
             threshold_dict = load_surrogate_thresholds(surrogate_csv_path, percentile=percentile_to_use)
         except:
@@ -3595,14 +3751,14 @@ if __name__ == "__main__":
     os.makedirs(save_dir, exist_ok=True)
     print(f"\nResults will be saved to: {save_dir}")
 
-    # Define results file path - only add percentile suffix if using surrogate thresholds
-    if use_surrogate_thresholds:
+    # Define results file path - only add percentile suffix when using surrogate thresholds
+    if use_surrogate_thresholds is not None:
         results_file = os.path.join(save_dir, f'reactivation_results{percentile_suffix}.pkl')
-        print(f"Using percentile: {percentile_to_use}th (suffix: {percentile_suffix})")
+        print(f"Using percentile: {percentile_to_use}th (suffix: {percentile_suffix}) | mode: {use_surrogate_thresholds}")
     else:
         results_file = os.path.join(save_dir, 'reactivation_results.pkl')
-        percentile_suffix = ''  # No suffix for plots when not using surrogate thresholds
-        print(f"Not using per-day surrogate thresholds - using common results file")
+        percentile_suffix = ''  # No suffix for plots when using fixed threshold
+        print(f"use_surrogate_thresholds=None: using fixed threshold_corr={threshold_corr}")
 
     if mode == 'compute':
         # ===== COMPUTE MODE: Run analysis for no_stim trials only =====
@@ -3610,28 +3766,26 @@ if __name__ == "__main__":
         print("COMPUTING REACTIVATION ANALYSIS (NO_STIM TRIALS)")
         print("="*60)
 
-        # Load per-day surrogate thresholds if available
-        surrogate_csv_path = os.path.join(io.results_dir, 'reactivation_surrogates_per_day', 'surrogate_thresholds_per_day.csv')
+        # Load surrogate thresholds if available
+        surrogate_csv_path = _get_surrogate_csv_path(use_surrogate_thresholds)
 
         threshold_dict = None
-        if use_surrogate_thresholds:
+        if surrogate_csv_path is not None:
             try:
                 print(f"\n{'='*60}")
                 print("LOADING SURROGATE-BASED THRESHOLDS")
                 print(f"{'='*60}")
                 threshold_dict = load_surrogate_thresholds(surrogate_csv_path, percentile=percentile_to_use)
                 print(f"Loaded thresholds from: {surrogate_csv_path}")
-                print(f"Percentile: {percentile_to_use}th (percentile-based)")
-                print(f"Threshold mode: per mouse-day")
+                print(f"Percentile: {percentile_to_use}th | Mode: {use_surrogate_thresholds}")
                 n_mice = len(threshold_dict)
-                n_mouse_days = sum(len(days_dict) for days_dict in threshold_dict.values())
-                print(f"Loaded thresholds for {n_mice} mice, {n_mouse_days} mouse-day combinations")
+                n_entries = sum(len(d) for d in threshold_dict.values())
+                print(f"Loaded thresholds for {n_mice} mice, {n_entries} mouse-day entries")
             except FileNotFoundError as e:
                 print(f"\n{e}")
-                print(f"Using common threshold: {threshold_corr}")
+                print(f"Falling back to fixed threshold_corr={threshold_corr}")
         else:
-            print(f"\nuse_surrogate_thresholds=False: Using common threshold instead of surrogate-based thresholds")
-            print(f"Using common threshold: {threshold_corr}")
+            print(f"\nuse_surrogate_thresholds=None: using fixed threshold_corr={threshold_corr}")
 
         # Process R+ mice in parallel
         print(f"\nProcessing R+ mice...")
@@ -3728,7 +3882,13 @@ if __name__ == "__main__":
         print(f"\nGenerating two-panel time-above per day plot...")
         plot_percent_time_above_per_day(r_plus_results, r_minus_results, svg_path)
 
-    # Plot 2: Percent time above vs performance (combined R+ and R-)
+    # Plot 2: Mean template correlation per day (R+ vs R-)
+    if len(r_plus_results) > 0 or len(r_minus_results) > 0:
+        svg_path = os.path.join(save_dir, f'mean_correlation_per_day{percentile_suffix}.svg')
+        print(f"\nGenerating mean correlation per day plot...")
+        plot_mean_correlation_per_day(r_plus_results, r_minus_results, svg_path)
+
+    # Plot 3: Percent time above vs performance (combined R+ and R-)
     if len(r_plus_results) > 0 or len(r_minus_results) > 0:
         svg_path = os.path.join(save_dir, f'percent_time_above_vs_performance{percentile_suffix}.svg')
         print(f"\nGenerating time-above vs performance plot...")

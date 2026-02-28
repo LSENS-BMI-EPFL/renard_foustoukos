@@ -16,8 +16,8 @@ Approach:
 3. Load no-stim trial data from that day only
 4. Generate N surrogate datasets by circular time-shifting each cell independently
 5. Compute template correlation for each surrogate
-6. Extract both percentile (pointwise threshold) and maximum (FWER) from each
-7. Average across surrogates to get final thresholds with confidence intervals
+6. Extract percentile (pointwise threshold) from each surrogate
+7. Take median across surrogates to get final threshold with confidence interval
 8. Each day gets its own threshold for event detection on that day
 
 Output:
@@ -62,8 +62,8 @@ n_map_trials = 40  # Number of mapping t/home/aprenard/repos/fast-learning/src/c
 threshold_dff = None  # 5% dF/F threshold for template cells (use None for all cells)
 
 # Surrogate parameters
-n_surrogates = 1000  # Number of surrogate iterations
-min_shift_frames = 0  # Minimum shift: 1 second at 30Hz
+n_surrogates = 100  # Number of surrogate iterations
+min_shift_frames = 0  # Minimum shift frames for circular shift
 percentiles_to_compute = [95, 99, 99.9]  # Percentiles for pointwise thresholds (computed in one go!)
 np.random.seed(42)  # For reproducibility
 
@@ -138,11 +138,12 @@ def create_surrogate_by_circular_shift(data, min_shift_frames=0):
 def compute_surrogate_thresholds(data, template, n_surrogates=10000, min_shift=0,
                                  percentiles=[95, 99, 99.9], verbose=True):
     """
-    Compute surrogate-based thresholds via circular time shifts for MULTIPLE percentiles.
+    Compute surrogate-based thresholds for MULTIPLE percentiles.
 
-    Generates n_surrogates time-shifted versions of the data, computes template
-    correlation for each, and extracts statistics to define thresholds. Efficiently
-    computes multiple percentiles from the same set of surrogate correlations.
+    Generates n_surrogates shuffled versions of the data using the chosen
+    shuffle_method, computes template correlation for each, and extracts
+    statistics to define thresholds. Efficiently computes multiple percentiles
+    from the same set of surrogate correlations.
 
     Parameters
     ----------
@@ -153,7 +154,7 @@ def compute_surrogate_thresholds(data, template, n_surrogates=10000, min_shift=0
     n_surrogates : int
         Number of surrogate iterations (default: 1000)
     min_shift : int
-        Minimum shift in frames (default: 30)
+        Minimum shift in frames for circular shift.
     percentiles : list of float
         Percentiles for pointwise thresholds (default: [95, 99, 99.9])
     verbose : bool
@@ -165,16 +166,11 @@ def compute_surrogate_thresholds(data, template, n_surrogates=10000, min_shift=0
         Dictionary keyed by percentile value, where each value is a dict with:
         {
             percentile_value: {
-                'threshold_percentile_mean': float,
+                'threshold_percentile_median': float,
                 'threshold_percentile_ci': (lower, upper),
-                'threshold_max_mean': float,
-                'threshold_max_ci': (lower, upper),
                 'surrogate_percentiles': np.ndarray of percentiles,
-                'surrogate_maxs': np.ndarray of maxima,
                 'observed_percentile': float,
-                'observed_max': float,
                 'p_value_percentile': float (percentile of observed in null),
-                'p_value_max': float,
                 'percentile_value': float (the percentile used)
             }
         }
@@ -188,74 +184,54 @@ def compute_surrogate_thresholds(data, template, n_surrogates=10000, min_shift=0
     # First compute observed statistics for all percentiles
     observed_corr = compute_template_correlation(data, template)
     observed_percentiles = {p: np.percentile(observed_corr, p) for p in percentiles}
-    observed_max = np.max(observed_corr)
 
     if verbose:
         for p in percentiles:
             print(f"    Observed: {p}th percentile = {observed_percentiles[p]:.4f}")
-        print(f"    Observed max = {observed_max:.4f}")
 
     # Initialize storage for each percentile
     surrogate_percentiles = {p: np.zeros(n_surrogates) for p in percentiles}
-    surrogate_maxs = np.zeros(n_surrogates)
 
     # Generate surrogates and compute statistics for ALL percentiles at once
     for i in range(n_surrogates):
         if verbose and (i+1) % 100 == 0:
             print(f"      Surrogate {i+1}/{n_surrogates}")
 
-        # Generate surrogate
+        # Generate surrogate via circular shift
         surrogate_data = create_surrogate_by_circular_shift(data, min_shift)
 
-        # Compute correlation with template (FAST with vectorized version!)
+        # Compute correlation with template
         surrogate_corr = compute_template_correlation(surrogate_data, template)
 
         # Extract ALL percentiles from the same surrogate correlation
         for p in percentiles:
             surrogate_percentiles[p][i] = np.percentile(surrogate_corr, p)
 
-        # Max is shared across all percentiles
-        surrogate_maxs[i] = np.max(surrogate_corr)
-
     # Compute statistics separately for each percentile
     results = {}
     for p in percentiles:
-        # Compute threshold means and confidence intervals
-        threshold_percentile_mean = np.mean(surrogate_percentiles[p])
+        # Compute threshold median and confidence interval
+        threshold_percentile_median = np.median(surrogate_percentiles[p])
         threshold_percentile_ci = (np.percentile(surrogate_percentiles[p], 2.5),
                                     np.percentile(surrogate_percentiles[p], 97.5))
 
-        threshold_max_mean = np.mean(surrogate_maxs)
-        threshold_max_ci = (np.percentile(surrogate_maxs, 2.5),
-                            np.percentile(surrogate_maxs, 97.5))
-
-        # Compute p-values: where does observed fall in surrogate distribution?
+        # Compute p-value: where does observed fall in surrogate distribution?
         p_value_percentile = percentileofscore(surrogate_percentiles[p],
                                                 observed_percentiles[p]) / 100.0
-        p_value_max = percentileofscore(surrogate_maxs, observed_max) / 100.0
 
         if verbose:
-            print(f"    Threshold ({p}th): {threshold_percentile_mean:.4f} "
+            print(f"    Threshold ({p}th): {threshold_percentile_median:.4f} "
                   f"[{threshold_percentile_ci[0]:.4f}, {threshold_percentile_ci[1]:.4f}]")
 
         # Store results for this percentile
         results[p] = {
-            'threshold_percentile_mean': threshold_percentile_mean,
+            'threshold_percentile_median': threshold_percentile_median,
             'threshold_percentile_ci': threshold_percentile_ci,
-            'threshold_max_mean': threshold_max_mean,
-            'threshold_max_ci': threshold_max_ci,
             'surrogate_percentiles': surrogate_percentiles[p],
-            'surrogate_maxs': surrogate_maxs,
             'observed_percentile': observed_percentiles[p],
-            'observed_max': observed_max,
             'p_value_percentile': p_value_percentile,
-            'p_value_max': p_value_max,
             'percentile_value': p
         }
-
-    if verbose:
-        print(f"    Max threshold (FWER): {threshold_max_mean:.4f} "
-              f"[{threshold_max_ci[0]:.4f}, {threshold_max_ci[1]:.4f}]")
 
     return results
 
@@ -346,7 +322,8 @@ def analyze_mouse_surrogates(mouse, days=[-2, -1, 0, 1, 2], threshold_dff=0.05,
 
             # Step 3: Compute surrogate thresholds for ALL percentiles at once
             surrogate_results = compute_surrogate_thresholds(
-                data, template, n_surrogates, min_shift_frames, percentiles=percentiles, verbose=verbose
+                data, template, n_surrogates, min_shift_frames,
+                percentiles=percentiles, verbose=verbose
             )
 
             # Store results separately for each percentile
@@ -361,16 +338,11 @@ def analyze_mouse_surrogates(mouse, days=[-2, -1, 0, 1, 2], threshold_dff=0.05,
                     'n_frames': n_frames,
                     'n_surrogates': n_surrogates,
                     'percentile_value': p,
-                    'threshold_percentile_mean': p_results['threshold_percentile_mean'],
+                    'threshold_percentile_median': p_results['threshold_percentile_median'],
                     'threshold_percentile_ci_lower': p_results['threshold_percentile_ci'][0],
                     'threshold_percentile_ci_upper': p_results['threshold_percentile_ci'][1],
-                    'threshold_max_mean': p_results['threshold_max_mean'],
-                    'threshold_max_ci_lower': p_results['threshold_max_ci'][0],
-                    'threshold_max_ci_upper': p_results['threshold_max_ci'][1],
                     'observed_percentile': p_results['observed_percentile'],
-                    'observed_max': p_results['observed_max'],
-                    'p_value_percentile': p_results['p_value_percentile'],
-                    'p_value_max': p_results['p_value_max']
+                    'p_value_percentile': p_results['p_value_percentile']
                 })
 
                 # Store detailed data for plotting
@@ -399,7 +371,8 @@ def analyze_mouse_surrogates(mouse, days=[-2, -1, 0, 1, 2], threshold_dff=0.05,
     return results_dfs, all_surrogate_data
 
 
-def process_single_mouse(mouse, days, threshold_dff, n_surrogates, percentiles=[95, 99, 99.9], verbose=False):
+def process_single_mouse(mouse, days, threshold_dff, n_surrogates,
+                         percentiles=[95, 99, 99.9], verbose=False):
     """
     Wrapper for parallel processing.
     """
@@ -435,18 +408,18 @@ def plot_surrogate_distributions(mouse, surrogate_data, save_path):
         for day in sorted(surrogate_data.keys()):
             results = surrogate_data[day]
 
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+            fig, ax1 = plt.subplots(1, 1, figsize=(7, 6))
 
             # Get percentile value from results
             percentile_val = int(results.get('percentile_value', 95))
 
-            # Left panel: Percentile distribution
+            # Surrogate percentile distribution
             ax1.hist(results['surrogate_percentiles'], bins=50, alpha=0.7, color='steelblue',
                     edgecolor='black', linewidth=0.5)
 
-            # Add mean threshold line
-            ax1.axvline(results['threshold_percentile_mean'], color='blue', linestyle='-',
-                       linewidth=2, label=f"Mean: {results['threshold_percentile_mean']:.4f}")
+            # Add median threshold line
+            ax1.axvline(results['threshold_percentile_median'], color='blue', linestyle='-',
+                       linewidth=2, label=f"Median: {results['threshold_percentile_median']:.4f}")
 
             # Add confidence interval
             ax1.axvspan(results['threshold_percentile_ci'][0], results['threshold_percentile_ci'][1],
@@ -465,42 +438,11 @@ def plot_surrogate_distributions(mouse, surrogate_data, save_path):
 
             ax1.set_xlabel(f'{percentile_val}th Percentile Correlation', fontweight='bold')
             ax1.set_ylabel('Count', fontweight='bold')
-            ax1.set_title(f'{percentile_val}th Percentile Threshold (Pointwise)', fontweight='bold')
+            ax1.set_title(f'{mouse} - Day {day}: {percentile_val}th Percentile Surrogate Distribution',
+                         fontweight='bold')
             ax1.legend(loc='upper left')
             ax1.grid(True, alpha=0.3, axis='y')
 
-            # Right panel: Max correlation distribution
-            ax2.hist(results['surrogate_maxs'], bins=50, alpha=0.7, color='darkorange',
-                    edgecolor='black', linewidth=0.5)
-
-            # Add mean threshold line
-            ax2.axvline(results['threshold_max_mean'], color='orange', linestyle='-',
-                       linewidth=2, label=f"Mean: {results['threshold_max_mean']:.4f}")
-
-            # Add confidence interval
-            ax2.axvspan(results['threshold_max_ci'][0], results['threshold_max_ci'][1],
-                       alpha=0.2, color='orange', label='95% CI')
-
-            # Add observed value
-            ax2.axvline(results['observed_max'], color='red', linestyle='--',
-                       linewidth=2, label=f"Observed: {results['observed_max']:.4f}")
-
-            # Statistics text
-            stats_text = f"n_surrogates = {len(results['surrogate_maxs'])}\n"
-            stats_text += f"p-value = {results['p_value_max']:.3f}"
-            ax2.text(0.97, 0.97, stats_text, transform=ax2.transAxes,
-                    fontsize=10, verticalalignment='top', horizontalalignment='right',
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'))
-
-            ax2.set_xlabel('Maximum Correlation', fontweight='bold')
-            ax2.set_ylabel('Count', fontweight='bold')
-            ax2.set_title(f'Maximum Threshold (FWER)', fontweight='bold')
-            ax2.legend(loc='upper left')
-            ax2.grid(True, alpha=0.3, axis='y')
-
-            # Overall title
-            fig.suptitle(f'{mouse} - Day {day} Surrogate Analysis',
-                        fontsize=14, fontweight='bold')
             plt.tight_layout()
 
             pdf.savefig(fig, bbox_inches='tight')
@@ -530,14 +472,14 @@ def plot_threshold_summary_across_mice(all_results_df, save_path):
 
     with PdfPages(save_path) as pdf:
         # Page 1: Threshold distributions by day and reward group
-        fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
         # Percentile thresholds across days - line plot
-        ax = axes[0, 0]
+        ax = axes[0]
         for reward_group, color in zip(['R+', 'R-'], ['steelblue', 'coral']):
             group_data = all_results_df[all_results_df['reward_group'] == reward_group]
-            day_means = group_data.groupby('day')['threshold_percentile_mean'].mean()
-            day_sems = group_data.groupby('day')['threshold_percentile_mean'].sem()
+            day_means = group_data.groupby('day')['threshold_percentile_median'].mean()
+            day_sems = group_data.groupby('day')['threshold_percentile_median'].sem()
             ax.errorbar(day_means.index, day_means.values, yerr=day_sems.values,
                        marker='o', linewidth=2, markersize=8, capsize=5,
                        label=f'{reward_group} (n={group_data["mouse_id"].nunique()})',
@@ -551,8 +493,8 @@ def plot_threshold_summary_across_mice(all_results_df, save_path):
         ax.grid(True, alpha=0.3)
 
         # Percentile thresholds - box plot by day
-        ax = axes[0, 1]
-        data_to_plot = [all_results_df[all_results_df['day'] == d]['threshold_percentile_mean'].values
+        ax = axes[1]
+        data_to_plot = [all_results_df[all_results_df['day'] == d]['threshold_percentile_median'].values
                        for d in days]
         bp = ax.boxplot(data_to_plot, labels=days_str, patch_artist=True, showmeans=True, widths=0.5)
         for patch in bp['boxes']:
@@ -563,76 +505,28 @@ def plot_threshold_summary_across_mice(all_results_df, save_path):
         ax.set_title(f'{percentile_val}th Percentile by Day (All Mice)', fontweight='bold')
         ax.grid(True, alpha=0.3, axis='y')
 
-        # Max thresholds across days - line plot
-        ax = axes[1, 0]
-        for reward_group, color in zip(['R+', 'R-'], ['darkorange', 'orchid']):
-            group_data = all_results_df[all_results_df['reward_group'] == reward_group]
-            day_means = group_data.groupby('day')['threshold_max_mean'].mean()
-            day_sems = group_data.groupby('day')['threshold_max_mean'].sem()
-            ax.errorbar(day_means.index, day_means.values, yerr=day_sems.values,
-                       marker='o', linewidth=2, markersize=8, capsize=5,
-                       label=f'{reward_group} (n={group_data["mouse_id"].nunique()})',
-                       color=color)
-        ax.set_xlabel('Day', fontweight='bold')
-        ax.set_ylabel('Maximum Threshold (FWER)', fontweight='bold')
-        ax.set_title('Maximum (FWER) Threshold Across Days', fontweight='bold')
-        ax.set_xticks(days)
-        ax.set_xticklabels(days_str)
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-
-        # Max thresholds - box plot by day
-        ax = axes[1, 1]
-        data_to_plot = [all_results_df[all_results_df['day'] == d]['threshold_max_mean'].values
-                       for d in days]
-        bp = ax.boxplot(data_to_plot, labels=days_str, patch_artist=True, showmeans=True, widths=0.5)
-        for patch in bp['boxes']:
-            patch.set_facecolor('darkorange')
-            patch.set_alpha(0.7)
-        ax.set_xlabel('Day', fontweight='bold')
-        ax.set_ylabel('Maximum Threshold (FWER)', fontweight='bold')
-        ax.set_title('Maximum (FWER) by Day (All Mice)', fontweight='bold')
-        ax.grid(True, alpha=0.3, axis='y')
-
         fig.suptitle('Per-Day Threshold Summary Across All Mice',
-                    fontsize=16, fontweight='bold', y=0.995)
+                    fontsize=16, fontweight='bold', y=1.01)
         plt.tight_layout()
         pdf.savefig(fig, bbox_inches='tight')
         plt.close()
 
         # Page 2: Reward group comparison
-        fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+        fig, axes = plt.subplots(2, 1, figsize=(7, 12))
 
-        for i, (reward_group, color_p, color_m) in enumerate(zip(['R+', 'R-'],
-                                                                  [('steelblue', 'darkorange'),
-                                                                   ('coral', 'orchid')])):
+        for i, (reward_group, color) in enumerate(zip(['R+', 'R-'], ['steelblue', 'coral'])):
             group_data = all_results_df[all_results_df['reward_group'] == reward_group]
 
-            # Percentile thresholds
-            ax = axes[i, 0]
-            data_to_plot = [group_data[group_data['day'] == d]['threshold_percentile_mean'].values
+            ax = axes[i]
+            data_to_plot = [group_data[group_data['day'] == d]['threshold_percentile_median'].values
                            for d in days]
             bp = ax.boxplot(data_to_plot, labels=days_str, patch_artist=True, showmeans=True, widths=0.5)
             for patch in bp['boxes']:
-                patch.set_facecolor(color_p[0])
+                patch.set_facecolor(color)
                 patch.set_alpha(0.7)
             ax.set_xlabel('Day', fontweight='bold')
             ax.set_ylabel(f'{percentile_val}th Percentile Threshold', fontweight='bold')
             ax.set_title(f'{reward_group}: {percentile_val}th Percentile by Day (n={group_data["mouse_id"].nunique()} mice)',
-                        fontweight='bold')
-            ax.grid(True, alpha=0.3, axis='y')
-
-            # Max thresholds
-            ax = axes[i, 1]
-            data_to_plot = [group_data[group_data['day'] == d]['threshold_max_mean'].values
-                           for d in days]
-            bp = ax.boxplot(data_to_plot, labels=days_str, patch_artist=True, showmeans=True, widths=0.5)
-            for patch in bp['boxes']:
-                patch.set_facecolor(color_p[1])
-                patch.set_alpha(0.7)
-            ax.set_xlabel('Day', fontweight='bold')
-            ax.set_ylabel('Maximum Threshold (FWER)', fontweight='bold')
-            ax.set_title(f'{reward_group}: Maximum (FWER) by Day (n={group_data["mouse_id"].nunique()} mice)',
                         fontweight='bold')
             ax.grid(True, alpha=0.3, axis='y')
 
@@ -651,11 +545,12 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print("REACTIVATION SURROGATE ANALYSIS - PER-DAY THRESHOLDS")
     print("="*60)
+
     print(f"\nParameters:")
     print(f"  Responsiveness threshold: {threshold_dff*100 if threshold_dff is not None else 'None (all cells)'}% dF/F")
     print(f"  Number of surrogates: {n_surrogates}")
     print(f"  Percentile thresholds: {percentiles_to_compute} (computed simultaneously!)")
-    print(f"  Minimum time shift: {min_shift_frames} frames ({min_shift_frames/sampling_rate:.1f} sec)")
+    print(f"  Minimum time shift: {min_shift_frames} frames ({min_shift_frames/sampling_rate:.1f} sec) [circular_shift only]")
     print(f"  Days: {days} (separate threshold per day)")
     print(f"  Parallel jobs: {n_jobs}")
 
@@ -762,8 +657,7 @@ if __name__ == "__main__":
                 day_data = group_data[group_data['day'] == day]
                 if len(day_data) > 0:
                     print(f"\n  Day {day}:")
-                    print(f"    {p}th percentile: {day_data['threshold_percentile_mean'].mean():.4f} ± {day_data['threshold_percentile_mean'].std():.4f}")
-                    print(f"    Max (FWER):       {day_data['threshold_max_mean'].mean():.4f} ± {day_data['threshold_max_mean'].std():.4f}")
+                    print(f"    {p}th percentile: {day_data['threshold_percentile_median'].mean():.4f} ± {day_data['threshold_percentile_median'].std():.4f}")
 
     print("\n" + "="*60)
     print("ANALYSIS COMPLETE")

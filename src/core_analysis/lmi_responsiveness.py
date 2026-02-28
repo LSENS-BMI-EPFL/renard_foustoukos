@@ -160,7 +160,7 @@ pos_lmi = lmi_df.loc[
 top5 = (
     pos_lmi
     .merge(not_resp_day2, on=['mouse_id', 'roi'])
-    .nlargest(20, 'lmi')
+    .nlargest(10, 'lmi')
     .reset_index(drop=True)
 )
 print("Top 5 positive LMI cells not responsive on day +2:")

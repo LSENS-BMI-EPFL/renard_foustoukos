@@ -48,6 +48,7 @@ example_mouse = 'AR127'           # Example mouse for transient QC figure
 # Paths
 save_dir = os.path.join(io.results_dir, 'reactivation')
 results_pkl = os.path.join(save_dir, 'reactivation_results_p99.pkl')
+participation_csv = os.path.join(io.results_dir, 'reactivation_lmi', 'cell_participation_rates_per_day.csv')
 folder = os.path.join(io.solve_common_paths('processed_data'), 'mice')
 
 os.makedirs(save_dir, exist_ok=True)
@@ -615,58 +616,209 @@ def plot_transient_qc(mouse_id, save_path, n_cells_to_show=5, max_trials=100):
 
 
 # ============================================================================
+# ANALYSIS 3: PARTICIPATION RATE VS TRANSIENT FREQUENCY
+# ============================================================================
+
+def compute_transient_freq_per_cell(mouse_id, day=0):
+    """
+    Compute transient frequency (events/min) per cell for a given mouse and day.
+    Uses no-stim trials only. Returns DataFrame: mouse_id, roi, transient_freq.
+    """
+    try:
+        xarr = utils_imaging.load_mouse_xarray(
+            mouse_id, folder, 'tensor_xarray_learning_data.nc', substracted=True
+        )
+    except Exception as e:
+        print(f"  Warning: Could not load data for {mouse_id}: {e}")
+        return pd.DataFrame()
+
+    xarr_day = xarr.sel(trial=(xarr['day'] == day) & (xarr['no_stim'] == 1))
+    if len(xarr_day.trial) == 0:
+        return pd.DataFrame()
+
+    n_cells = len(xarr_day.cell)
+    roi_ids = xarr_day['roi'].values
+    data = xarr_day.values.reshape(n_cells, -1)
+    data = np.nan_to_num(data, nan=0.0)
+    session_duration_min = data.shape[1] / sampling_rate / 60
+
+    rows = []
+    for c in range(n_cells):
+        n_peaks = len(detect_transients(data[c]))
+        rows.append({
+            'mouse_id': mouse_id,
+            'roi': roi_ids[c],
+            'transient_freq': n_peaks / session_duration_min,
+        })
+    return pd.DataFrame(rows)
+
+
+def plot_participation_vs_transient_freq(participation_csv_path, save_path, n_bins=5):
+    """
+    Bar plot: mean cell participation rate (day 0) per transient frequency bin,
+    one panel per reward group (R+ and R-).
+
+    Transient frequency bins are defined as global quantiles across all cells
+    so the x-axis is comparable between panels.
+
+    Parameters
+    ----------
+    participation_csv_path : str
+        Path to cell_participation_rates_per_day.csv from reactivation_lmi_prediction.py
+    save_path : str
+        Path to save SVG file
+    n_bins : int
+        Number of quantile bins for transient frequency
+    """
+    if not os.path.exists(participation_csv_path):
+        print(f"  Warning: Participation CSV not found: {participation_csv_path}")
+        return None
+
+    # Load day-0 participation data
+    part_df = pd.read_csv(participation_csv_path)
+    part_df = part_df[part_df['day'] == 0].copy()
+    if len(part_df) == 0:
+        print("  Warning: No day-0 participation data in CSV.")
+        return None
+
+    # Compute per-cell transient frequency for each mouse
+    mice = part_df['mouse_id'].unique()
+    transient_parts = []
+    for mouse_id in mice:
+        print(f"  Computing transient freq for {mouse_id}...")
+        transient_parts.append(compute_transient_freq_per_cell(mouse_id, day=0))
+
+    transient_df = pd.concat([d for d in transient_parts if len(d) > 0], ignore_index=True)
+    if len(transient_df) == 0:
+        print("  Warning: No transient data computed.")
+        return None
+
+    # Merge participation and transient freq on (mouse_id, roi)
+    merged = part_df.merge(transient_df, on=['mouse_id', 'roi'], how='inner')
+
+    # Add reward group
+    group_map = {m: 'R+' for m in r_plus_mice}
+    group_map.update({m: 'R-' for m in r_minus_mice})
+    merged['reward_group'] = merged['mouse_id'].map(group_map)
+    merged = merged.dropna(subset=['reward_group', 'transient_freq', 'participation_rate'])
+
+    # Global quantile bins so x-axis is identical across both panels
+    merged['freq_bin'], bin_edges = pd.qcut(
+        merged['transient_freq'], q=n_bins, retbins=True, duplicates='drop'
+    )
+    merged['freq_bin_label'] = merged['freq_bin'].apply(
+        lambda x: f'{x.left:.2f}–{x.right:.2f}' if pd.notna(x) else np.nan
+    )
+    bin_order = (
+        merged.groupby('freq_bin_label')['transient_freq']
+        .mean().sort_values().index.tolist()
+    )
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+
+    for i, (reward_group, color) in enumerate([('R+', reward_palette[1]), ('R-', reward_palette[0])]):
+        ax = axes[i]
+        gdata = merged[merged['reward_group'] == reward_group]
+
+        if len(gdata) == 0:
+            ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f'{reward_group}', fontweight='bold', fontsize=13)
+            continue
+
+        n_mice = gdata['mouse_id'].nunique()
+        n_cells = len(gdata)
+
+        sns.barplot(
+            data=gdata, x='freq_bin_label', y='participation_rate',
+            order=bin_order,
+            color=color, errorbar='ci', ax=ax,
+            alpha=0.8, edgecolor='black', linewidth=0.8
+        )
+
+        ax.set_xlabel('Transient frequency (events/min)', fontweight='bold', fontsize=12)
+        ax.set_ylabel('Participation rate (day 0)' if i == 0 else '', fontweight='bold', fontsize=12)
+        ax.set_title(f'{reward_group}  (n={n_mice} mice, {n_cells} cells)',
+                     fontweight='bold', fontsize=13)
+        ax.tick_params(axis='x', rotation=45)
+        ax.grid(True, alpha=0.3, axis='y')
+
+    fig.suptitle('Cell Participation Rate vs Transient Frequency (Day 0)',
+                 fontsize=13, fontweight='bold')
+    sns.despine()
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, format='svg', dpi=300, bbox_inches='tight')
+        print(f"  Saved: {save_path}")
+        plt.close()
+
+        data_csv = save_path.replace('.svg', '_data.csv')
+        merged.drop(columns=['freq_bin'], errors='ignore').to_csv(data_csv, index=False)
+        print(f"  Data CSV saved: {data_csv}")
+
+    return fig
+
+
+# ============================================================================
 # MAIN EXECUTION
 # ============================================================================
 
 all_mice = r_plus_mice + r_minus_mice
 
+# print("\n" + "="*60)
+# print("ANALYSIS 1: NO-STIM PSTH")
+# print("="*60)
+
+# print(f"\nComputing no-stim PSTH for {len(all_mice)} mice...")
+# psth_df = compute_nostim_psth(all_mice)
+
+# if len(psth_df) > 0:
+#     svg_path = os.path.join(save_dir, 'nostim_psth_per_day.svg')
+#     plot_nostim_psth_per_day(psth_df, svg_path)
+
+#     print("\nLoading reactivation results...")
+#     with open(results_pkl, 'rb') as f:
+#         results_data = pickle.load(f)
+#     r_plus_results = results_data['r_plus_results']
+#     r_minus_results = results_data['r_minus_results']
+
+#     svg_path = os.path.join(save_dir, 'nostim_response_vs_reactivation_day0.svg')
+#     print("\nNo-stim response vs reactivation frequency (Day 0):")
+#     plot_nostim_response_vs_reactivation(psth_df, r_plus_results, r_minus_results, svg_path)
+# else:
+#     print("  Warning: No PSTH data computed.")
+
+# print("\n" + "="*60)
+# print("ANALYSIS 2: CALCIUM TRANSIENT FREQUENCY")
+# print("="*60)
+
+# print(f"\nDetecting transients for {len(all_mice)} mice...")
+# transient_df = compute_transient_frequencies(all_mice)
+
+# svg_path = os.path.join(save_dir, 'transient_freq_per_day.svg')
+# plot_transient_freq_per_day(transient_df, svg_path)
+
+# if 'r_plus_results' not in dir():
+#     with open(results_pkl, 'rb') as f:
+#         results_data = pickle.load(f)
+#     r_plus_results = results_data['r_plus_results']
+#     r_minus_results = results_data['r_minus_results']
+
+# svg_path = os.path.join(save_dir, 'transient_freq_vs_reactivation_day0.svg')
+# print("\nTransient vs reactivation frequency (Day 0):")
+# plot_transient_vs_reactivation(transient_df, r_plus_results, r_minus_results, svg_path)
+
+# svg_path = os.path.join(save_dir, f'transient_qc_{example_mouse}.svg')
+# print(f"\nGenerating QC figure for {example_mouse}...")
+# plot_transient_qc(example_mouse, svg_path)
+
 print("\n" + "="*60)
-print("ANALYSIS 1: NO-STIM PSTH")
+print("ANALYSIS 3: PARTICIPATION RATE VS TRANSIENT FREQUENCY")
 print("="*60)
 
-print(f"\nComputing no-stim PSTH for {len(all_mice)} mice...")
-psth_df = compute_nostim_psth(all_mice)
-
-if len(psth_df) > 0:
-    svg_path = os.path.join(save_dir, 'nostim_psth_per_day.svg')
-    plot_nostim_psth_per_day(psth_df, svg_path)
-
-    print("\nLoading reactivation results...")
-    with open(results_pkl, 'rb') as f:
-        results_data = pickle.load(f)
-    r_plus_results = results_data['r_plus_results']
-    r_minus_results = results_data['r_minus_results']
-
-    svg_path = os.path.join(save_dir, 'nostim_response_vs_reactivation_day0.svg')
-    print("\nNo-stim response vs reactivation frequency (Day 0):")
-    plot_nostim_response_vs_reactivation(psth_df, r_plus_results, r_minus_results, svg_path)
-else:
-    print("  Warning: No PSTH data computed.")
-
-print("\n" + "="*60)
-print("ANALYSIS 2: CALCIUM TRANSIENT FREQUENCY")
-print("="*60)
-
-print(f"\nDetecting transients for {len(all_mice)} mice...")
-transient_df = compute_transient_frequencies(all_mice)
-
-svg_path = os.path.join(save_dir, 'transient_freq_per_day.svg')
-plot_transient_freq_per_day(transient_df, svg_path)
-
-if 'r_plus_results' not in dir():
-    with open(results_pkl, 'rb') as f:
-        results_data = pickle.load(f)
-    r_plus_results = results_data['r_plus_results']
-    r_minus_results = results_data['r_minus_results']
-
-svg_path = os.path.join(save_dir, 'transient_freq_vs_reactivation_day0.svg')
-print("\nTransient vs reactivation frequency (Day 0):")
-plot_transient_vs_reactivation(transient_df, r_plus_results, r_minus_results, svg_path)
-
-svg_path = os.path.join(save_dir, f'transient_qc_{example_mouse}.svg')
-print(f"\nGenerating QC figure for {example_mouse}...")
-plot_transient_qc(example_mouse, svg_path)
-
+svg_path = os.path.join(save_dir, 'participation_vs_transient_freq_day0.svg')
+print(f"\nPlotting participation rate vs transient frequency (Day 0)...")
+plot_participation_vs_transient_freq(participation_csv, svg_path)
 
 print("\n" + "="*60)
 print("DONE")
