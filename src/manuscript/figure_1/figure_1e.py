@@ -18,6 +18,9 @@ from src.utils.utils_plot import behavior_palette
 from src.utils.utils_behavior import plot_single_session
 
 
+OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_1/output'
+
+
 # ============================================================================
 # Main Panel Generation
 # ============================================================================
@@ -27,7 +30,7 @@ def generate_panel(
     days=[-2, -1, 0, 1, 2],
     max_trials=180,
     table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_imagingmice_table_5days_cut.csv',
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/illustrations/behavior',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -62,7 +65,6 @@ def generate_panel(
     )
 
     # Generate figure for each mouse
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     for mouse_id in mouse_ids:
@@ -95,6 +97,18 @@ def generate_panel(
         # plt.close()
 
         print(f"Figure 1e ({mouse_id}) saved to: {output_file}")
+
+    # Save data: behavioral table filtered for these mice and days
+    all_data = []
+    for mouse_id in mouse_ids:
+        d = table.loc[table.mouse_id == mouse_id]
+        d = d.loc[d.day.isin(days)]
+        d = d.loc[d.trial_id <= max_trials]
+        all_data.append(d)
+    pd.concat(all_data, ignore_index=True).to_csv(
+        os.path.join(save_path, 'figure_1e_data.csv'), index=False
+    )
+    print(f"Figure 1e data saved to: {os.path.join(save_path, 'figure_1e_data.csv')}")
 
 
 # ============================================================================

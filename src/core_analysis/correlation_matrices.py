@@ -626,7 +626,7 @@ svg_file2 = f'network_day0_trajectory_{similarity_metric}_ctype_{projection_type
 plt.savefig(os.path.join(output_dir, svg_file2), format='svg', dpi=300)
 plt.savefig(os.path.join(output_dir, svg_file2.replace('.svg', '.png')), format='png', dpi=300)
 
-# Figure 3: Reorganization Index (ylim 0 to 0.15)
+# Figure 3: Reorganization Index
 fig3, ax3 = plt.subplots(1, 1, figsize=(4, 5))
 
 metrics_long_reorg = metrics_combined.melt(

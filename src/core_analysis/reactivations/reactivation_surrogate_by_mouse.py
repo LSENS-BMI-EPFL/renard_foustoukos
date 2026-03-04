@@ -62,7 +62,7 @@ days_str = ['-2', '-1', '0', '+1', '+2']
 threshold_dff = None  # dF/F threshold for template cells (None = all cells)
 
 # Surrogate parameters
-n_surrogates = 40
+n_surrogates = 1000
 min_shift_frames = 0
 percentiles_to_compute = [99]
 np.random.seed(42)
@@ -132,7 +132,7 @@ def analyze_mouse_surrogates(mouse, threshold_dff=None, n_surrogates=1000,
     try:
         folder = os.path.join(io.solve_common_paths('processed_data'), 'mice')
         xarray_learning = utils_imaging.load_mouse_xarray(
-            mouse, folder, 'tensor_xarray_learning_data.nc', substracted=True
+            mouse, folder, 'tensor_xarray_learning_data.nc', substracted=False
         )
     except Exception as e:
         if verbose:

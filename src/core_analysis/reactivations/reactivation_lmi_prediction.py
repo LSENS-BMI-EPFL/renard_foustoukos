@@ -91,9 +91,19 @@ threshold_mode  = 'day'      # 'mouse' or 'day'
 threshold_type  = 'percentile'
 threshold_corr  = 0.45       # fallback fixed threshold
 
-save_dir = os.path.join(io.results_dir, 'reactivation')
+save_dir = os.path.join(io.processed_dir, 'reactivation')
 _p_str = str(int(percentile_to_use)) if percentile_to_use == int(percentile_to_use) else str(int(percentile_to_use * 10))
 reactivation_results_file = os.path.join(save_dir, f'reactivation_results_p{_p_str}.pkl')
+
+# Circular shift control parameters
+#   'compute' : run circular shifts (slow), save results, then plot
+#   'plot'    : load previously saved results and plot only
+#   'skip'    : do not run the circular shift control
+circular_shift_mode = 'compute'
+n_shifts = 1000          # number of circular shifts per mouse-day
+min_shift_frames = 300   # minimum shift gap (10 s at 30 Hz)
+significance_pctile = 95  # 95th percentile → p < 0.05
+circular_shift_csv = os.path.join(io.processed_dir, 'reactivations', 'circular_shift_participation_per_day.csv')
 
 # Load database
 _, _, all_mice, db = io.select_sessions_from_db(
@@ -779,6 +789,147 @@ def process_single_mouse(mouse, days, verbose=False, threshold_dict=None, preloa
 
 
 # =============================================================================
+# CIRCULAR SHIFT CONTROL FUNCTIONS
+# =============================================================================
+
+def _participation_from_3d(data_3d, events, n_timepoints, n_trials):
+    """
+    Vectorised participation rate per cell.
+
+    Parameters
+    ----------
+    data_3d : ndarray (n_cells, n_trials, n_timepoints)
+    events   : array-like of event frame indices in the flattened space
+               (event_idx = trial_idx * n_timepoints + time_idx)
+
+    Returns
+    -------
+    rates   : ndarray (n_cells,) or None
+    n_valid : int — number of valid events used
+    """
+    win = event_window_frames
+    valid = [ev for ev in events
+             if (ev % n_timepoints) >= win
+             and (ev % n_timepoints) < n_timepoints - win
+             and (ev // n_timepoints) < n_trials]
+    if not valid:
+        return None, 0
+
+    t_idxs  = np.array([ev % n_timepoints  for ev in valid])
+    tr_idxs = np.array([ev // n_timepoints for ev in valid])
+
+    windows = np.stack([
+        data_3d[:, tr_idxs[i], t_idxs[i] - win:t_idxs[i] + win + 1]
+        for i in range(len(valid))
+    ])  # (n_valid_events, n_cells, 2*win+1)
+    avg   = np.mean(windows, axis=2)                          # (n_valid, n_cells)
+    rates = np.mean(avg >= participation_threshold, axis=0)   # (n_cells,)
+    return rates, len(valid)
+
+
+def compute_participation_with_shifts(mouse, day, n_shifts, preloaded_events,
+                                      verbose=False):
+    """
+    Compute real participation rates and a circular-shift null distribution
+    for one mouse × day.
+
+    The same random shift is applied to all cells simultaneously, preserving
+    inter-cell correlations while breaking alignment with reactivation events.
+
+    Parameters
+    ----------
+    mouse            : str
+    day              : int
+    n_shifts         : int
+    preloaded_events : array-like
+        Event frame indices from reactivation.py (reactivation_results.pkl).
+    verbose          : bool
+
+    Returns
+    -------
+    pd.DataFrame with columns:
+        mouse_id, day, roi,
+        participation_rate  — real participation rate
+        threshold_95        — significance threshold (significance_pctile percentile of null)
+        n_events            — number of valid events used
+        significant         — bool, real > threshold_95
+    or None on failure.
+    """
+    import pickle as _pickle
+    try:
+        template, _ = create_whisker_template(mouse, day, threshold_dff, verbose=False)
+        folder = os.path.join(io.solve_common_paths('processed_data'), 'mice')
+        xr = utils_imaging.load_mouse_xarray(
+            mouse, folder, 'tensor_xarray_learning_data.nc', substracted=True)
+        xr_day = xr.sel(trial=xr['day'] == day)
+        nostim  = xr_day.sel(trial=xr_day['no_stim'] == 1)
+
+        n_cells, n_trials, n_timepoints = nostim.shape
+        if n_trials < 10:
+            return None
+
+        data_3d  = np.nan_to_num(nostim.values, nan=0.0)
+        roi_list = nostim['roi'].values
+        n_frames = n_trials * n_timepoints
+
+        if preloaded_events is None or len(preloaded_events) == 0:
+            return None
+
+        real_rates, n_valid = _participation_from_3d(
+            data_3d, preloaded_events, n_timepoints, n_trials)
+
+        if real_rates is None or n_valid < min_events_for_reliability:
+            return None
+
+        # Null distribution: n_shifts × n_cells (same shift for all cells)
+        data_flat  = data_3d.reshape(n_cells, n_frames)
+        null_rates = np.full((n_shifts, n_cells), np.nan)
+
+        for i_shift in range(n_shifts):
+            shift      = np.random.randint(min_shift_frames, n_frames)
+            shifted_3d = np.roll(data_flat, shift, axis=1).reshape(
+                n_cells, n_trials, n_timepoints)
+            null_r, _ = _participation_from_3d(
+                shifted_3d, preloaded_events, n_timepoints, n_trials)
+            if null_r is not None:
+                null_rates[i_shift] = null_r
+
+        threshold_pctile = np.nanpercentile(null_rates, significance_pctile, axis=0)
+        significant      = real_rates > threshold_pctile
+
+        records = [
+            {'mouse_id': mouse, 'day': day, 'roi': roi_list[icell],
+             'participation_rate': real_rates[icell],
+             'threshold_95': threshold_pctile[icell],
+             'n_events': n_valid,
+             'significant': bool(significant[icell])}
+            for icell in range(n_cells)
+            if not np.isnan(real_rates[icell])
+        ]
+
+        return pd.DataFrame(records) if records else None
+
+    except Exception as e:
+        if verbose:
+            print(f"    {mouse} day {day}: {e}")
+        return None
+
+
+def _process_mouse_circular_shift(mouse, n_shifts, preloaded_results):
+    """Process all days for one mouse for the circular shift control."""
+    dfs = []
+    for day in days:
+        events = None
+        if preloaded_results is not None:
+            day_data = preloaded_results.get('days', {}).get(day, {})
+            events   = day_data.get('events', None)
+        df = compute_participation_with_shifts(mouse, day, n_shifts, events)
+        if df is not None:
+            dfs.append(df)
+    return mouse, pd.concat(dfs, ignore_index=True) if dfs else None
+
+
+# =============================================================================
 # VISUALIZATION FUNCTIONS
 # =============================================================================
 
@@ -1264,151 +1415,84 @@ def plot_temporal_evolution(merged_df, participation_df_all, save_path=None):
             interaction_p = np.nan
 
         # =====================================================================
-        # POSTHOC TESTS: Paired t-tests per day with FDR correction
+        # POSTHOC TESTS: Paired t-tests per day (LMI+ vs LMI-)
         # =====================================================================
-        print(f"\n  Posthoc tests (LMI+ vs LMI- per day, FDR-corrected):")
+        print(f"\n  Posthoc tests (LMI+ vs LMI- per day):")
 
-        posthoc_results = {}
-        p_values_all_days = []
-        days_with_tests = []
+        posthoc_results = {day: {'p': np.nan, 'significant': False} for day in days}
 
         for day in days:
-            # Get data for both LMI categories for this day
             pos_day = df_pos[df_pos['day'] == day]
             neg_day = df_neg[df_neg['day'] == day]
 
-            # Find mice present in both groups
             mice_pos = set(pos_day['mouse_id'].unique())
             mice_neg = set(neg_day['mouse_id'].unique())
             mice_both = mice_pos & mice_neg
 
-            if len(mice_both) >= 3:  # Need at least 3 pairs for meaningful test
-                # Get paired data
-                pos_values = []
-                neg_values = []
-                for mouse_id in sorted(mice_both):
-                    pos_val = pos_day[pos_day['mouse_id'] == mouse_id]['participation_rate'].values[0]
-                    neg_val = neg_day[neg_day['mouse_id'] == mouse_id]['participation_rate'].values[0]
-                    pos_values.append(pos_val)
-                    neg_values.append(neg_val)
-
-                # Paired t-test
+            if len(mice_both) >= 3:
+                pos_values = [pos_day[pos_day['mouse_id'] == m]['participation_rate'].values[0]
+                              for m in sorted(mice_both)]
+                neg_values = [neg_day[neg_day['mouse_id'] == m]['participation_rate'].values[0]
+                              for m in sorted(mice_both)]
                 try:
-                    t_stat, p_val = ttest_rel(pos_values, neg_values)
-                    p_values_all_days.append(p_val)
-                    days_with_tests.append(day)
-                    posthoc_results[day] = {'p_uncorrected': p_val, 'n_mice': len(mice_both)}
+                    _, p_val = ttest_rel(pos_values, neg_values)
+                    posthoc_results[day] = {'p': p_val, 'significant': p_val < 0.05,
+                                            'n_mice': len(mice_both)}
+                    sig_marker = ('***' if p_val < 0.001 else '**' if p_val < 0.01
+                                  else '*' if p_val < 0.05 else 'ns')
+                    print(f"    Day {day:+2d}: n={len(mice_both)} mice, p={p_val:.4f} {sig_marker}")
                 except Exception as e:
                     print(f"    Day {day:+2d}: Test failed - {e}")
-                    posthoc_results[day] = {'p_uncorrected': np.nan, 'n_mice': len(mice_both)}
             else:
-                posthoc_results[day] = {'p_uncorrected': np.nan, 'n_mice': len(mice_both)}
+                n = len(mice_both)
+                posthoc_results[day]['n_mice'] = n
+                print(f"    Day {day:+2d}: Insufficient paired data (n={n} mice)")
 
-        # Apply FDR correction (Benjamini-Hochberg)
-        if len(p_values_all_days) > 0:
-            reject, p_corrected, _, _ = multipletests(p_values_all_days, method='fdr_bh')
+        # Seaborn barplot: mean ± 95% CI, no end caps on error bars
+        sns.barplot(
+            data=plot_df, x='day', y='participation_rate', hue='lmi_category',
+            hue_order=lmi_categories, palette=colors, order=days,
+            estimator=np.mean, errorbar=('ci', 95), capsize=0,
+            err_kws={'linewidth': 1.5}, ax=ax
+        )
+        for patch in ax.patches:
+            patch.set_alpha(0.7)
+            patch.set_edgecolor('black')
+            patch.set_linewidth(0.8)
 
-            # Update results with corrected p-values
-            for idx, day in enumerate(days_with_tests):
-                posthoc_results[day]['p_corrected'] = p_corrected[idx]
-                posthoc_results[day]['significant_fdr'] = reject[idx]
-
-            # Print results
-            for day in days:
-                if day in posthoc_results and not np.isnan(posthoc_results[day]['p_uncorrected']):
-                    p_unc = posthoc_results[day]['p_uncorrected']
-                    p_corr = posthoc_results[day].get('p_corrected', np.nan)
-                    sig = posthoc_results[day].get('significant_fdr', False)
-                    n = posthoc_results[day]['n_mice']
-
-                    sig_marker = '***' if p_corr < 0.001 else '**' if p_corr < 0.01 else '*' if p_corr < 0.05 else 'ns'
-                    print(f"    Day {day:+2d}: n={n} mice, p_uncorr={p_unc:.4f}, p_FDR={p_corr:.4f} {sig_marker}")
-                elif day in posthoc_results:
-                    n = posthoc_results[day]['n_mice']
-                    print(f"    Day {day:+2d}: Insufficient paired data (n={n} mice)")
-
-            # Save posthoc results to CSV
-            if save_path:
-                posthoc_csv = save_path.replace('.svg', f'_{reward_group.replace("+", "plus").replace("-", "minus")}_posthoc.csv')
-                posthoc_df = pd.DataFrame([
-                    {'day': day, **posthoc_results[day]}
-                    for day in days if day in posthoc_results
-                ])
-                posthoc_df.to_csv(posthoc_csv, index=False)
-                print(f"\n  Saved posthoc results: {posthoc_csv}")
-        else:
-            print("    No valid paired comparisons available")
-            posthoc_results = {day: {'p_corrected': np.nan, 'significant_fdr': False} for day in days}
-
-        # Create barplot with individual mouse data points connected by lines
-        x_positions = {day: idx for idx, day in enumerate(days)}
-        bar_width = 0.35
-
-        # Plot bars (mean across mice with 95% CI)
+        # Individual mouse trajectories, using bar centers from ax.containers
         for j, lmi_category in enumerate(lmi_categories):
-            cat_data = plot_df[plot_df['lmi_category'] == lmi_category]
-            if len(cat_data) == 0:
+            if j >= len(ax.containers):
                 continue
+            cat_data = plot_df[plot_df['lmi_category'] == lmi_category]
+            x_centers = {days[k]: bar.get_x() + bar.get_width() / 2
+                         for k, bar in enumerate(ax.containers[j])}
+            for mouse_id in cat_data['mouse_id'].unique():
+                mdata = cat_data[cat_data['mouse_id'] == mouse_id].sort_values('day')
+                mx = [x_centers[d] for d in mdata['day'] if d in x_centers]
+                my = mdata['participation_rate'].values
+                ax.plot(mx, my, '-', color=colors[lmi_category],
+                        linewidth=0.8, alpha=0.4, zorder=5)
 
-            # Compute stats per day
-            day_stats_list = []
-            for day in days:
-                day_data = cat_data[cat_data['day'] == day]['participation_rate'].values
-                if len(day_data) > 0:
-                    mean_val = np.mean(day_data)
-                    # 95% confidence interval
-                    ci = 1.96 * np.std(day_data, ddof=1) / np.sqrt(len(day_data))
-                    day_stats_list.append({
-                        'day': day,
-                        'mean': mean_val,
-                        'ci': ci
-                    })
-
-            day_stats = pd.DataFrame(day_stats_list)
-
-            x_vals = [x_positions[day] + (j - 0.5) * bar_width for day in day_stats['day']]
-
-            ax.bar(x_vals, day_stats['mean'],
-                  width=bar_width, label=f'{lmi_category.capitalize()} LMI',
-                  color=colors[lmi_category], alpha=0.7, edgecolor='black', linewidth=1)
-
-            # Add seaborn-style error bars (95% CI) - thinner, cleaner style
-            ax.errorbar(x_vals, day_stats['mean'],
-                       yerr=day_stats['ci'],
-                       fmt='none', ecolor='black', capsize=4, linewidth=1.2,
-                       capthick=1.2, alpha=0.9, zorder=10)
-
-            # Plot individual mouse trajectories
-            mice = cat_data['mouse_id'].unique()
-            for mouse_id in mice:
-                mouse_data = cat_data[cat_data['mouse_id'] == mouse_id].sort_values('day')
-                mouse_x = [x_positions[day] + (j - 0.5) * bar_width for day in mouse_data['day']]
-                mouse_y = mouse_data['participation_rate'].values
-
-                # Lines only (no markers), colored by LMI category
-                ax.plot(mouse_x, mouse_y, '-', color=colors[lmi_category],
-                       linewidth=0.8, alpha=0.4, zorder=5)
-
-        # Add significance markers for FDR-corrected posthoc tests
+        # Significance markers
+        ax.set_ylim(0, 0.6)
         y_max = 0.57
-        for day in days:
-            if day in posthoc_results:
-                p_val = posthoc_results[day].get('p_corrected', np.nan)
-                x_center = x_positions[day]
-
-                if not np.isnan(p_val) and p_val < 0.05:
-                    sig_marker = '***' if p_val < 0.001 else '**' if p_val < 0.01 else '*'
-                    ax.text(x_center, y_max, sig_marker, ha='center', va='bottom',
-                           fontsize=12, fontweight='bold')
+        for k, day in enumerate(days):
+            p_val = posthoc_results[day].get('p', np.nan)
+            if not np.isnan(p_val) and p_val < 0.05:
+                sig_marker = '***' if p_val < 0.001 else '**' if p_val < 0.01 else '*'
+                x0 = ax.containers[0][k].get_x() + ax.containers[0][k].get_width() / 2
+                x1 = ax.containers[1][k].get_x() + ax.containers[1][k].get_width() / 2
+                ax.text((x0 + x1) / 2, y_max, sig_marker, ha='center', va='bottom',
+                        fontsize=12, fontweight='bold')
 
         ax.set_xlabel('Day', fontweight='bold', fontsize=13)
         ax.set_ylabel('Participation Rate', fontweight='bold', fontsize=13)
         ax.set_title(f'{reward_group} Mice', fontweight='bold', fontsize=14)
-        ax.set_xticks([x_positions[day] for day in days])
-        ax.set_xticklabels([str(d) for d in days])
-        ax.legend(loc='best', fontsize=11)
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles, [f'{l.capitalize()} LMI' for l in labels],
+                  loc='best', fontsize=11)
         ax.grid(True, alpha=0.3, axis='y')
-        ax.set_ylim(0, 0.6)
         sns.despine(ax=ax)
 
     plt.tight_layout()
@@ -1473,7 +1557,7 @@ def plot_temporal_evolution(merged_df, participation_df_all, save_path=None):
         return fig
 
 
-def generate_visualizations(merged_df, participation_df_all, output_dir):
+def generate_visualizations(merged_df, participation_df_all, output_dir, label='all'):
     """
     Generate visualization figures as SVG.
 
@@ -1485,31 +1569,35 @@ def generate_visualizations(merged_df, participation_df_all, output_dir):
         Per-day participation data
     output_dir : str
         Directory to save figures
+    label : str
+        Short label appended to filenames to distinguish populations
+        (e.g. 'all' or 'sig_cells').
     """
     print("\n" + "="*60)
-    print("GENERATING VISUALIZATIONS")
+    print(f"GENERATING VISUALIZATIONS ({label})")
     print("="*60)
 
-    # Save figures as SVG
-    print("\n  Figure 1a: Participation rate vs LMI scatter plot (all cells)")
+    suffix = f'_{label}' if label else ''
+
+    print(f"\n  Figure 1a: Participation rate vs LMI scatter plot ({label})")
     plot_participation_rate_vs_lmi(
         merged_df,
         participation_metric='learning_rate',
-        save_path=os.path.join(output_dir, 'participation_rate_vs_lmi_all.svg')
+        save_path=os.path.join(output_dir, f'participation_rate_vs_lmi{suffix}.svg')
     )
 
-    print("\n  Figure 1b: Participation rate vs LMI histogram (all cells)")
+    print(f"\n  Figure 1b: Participation rate vs LMI histogram ({label})")
     plot_participation_rate_vs_lmi_histogram(
         merged_df,
         participation_metric='learning_rate',
-        save_path=os.path.join(output_dir, 'participation_rate_vs_lmi_histogram_all.svg')
+        save_path=os.path.join(output_dir, f'participation_rate_vs_lmi_histogram{suffix}.svg')
     )
 
-    print("\n  Figure 2: Temporal evolution across days (barplot per mouse)")
+    print(f"\n  Figure 2: Temporal evolution across days ({label})")
     plot_temporal_evolution(
         merged_df,
         participation_df_all,
-        save_path=os.path.join(output_dir, 'temporal_evolution_per_mouse.svg')
+        save_path=os.path.join(output_dir, f'temporal_evolution_per_mouse{suffix}.svg')
     )
 
 
@@ -1528,11 +1616,13 @@ if __name__ == "__main__":
     print(f"  Days: {days}")
     print(f"  Parallel jobs: {n_jobs}")
 
-    # Create output directory
-    output_dir = '/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/reactivation_lmi'
-    output_dir = io.adjust_path_to_host(output_dir)
+    # Create output directories
+    processed_data_dir = os.path.join(io.processed_dir, 'reactivation')
+    output_dir = os.path.join(io.results_dir, 'reactivation')
+    os.makedirs(processed_data_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
-    print(f"\nResults will be saved to: {output_dir}")
+    print(f"\nProcessed data will be saved to: {processed_data_dir}")
+    print(f"Visualisations will be saved to:  {output_dir}")
 
     # Load surrogate thresholds if available
     # Choose file based on threshold_mode
@@ -1607,8 +1697,8 @@ if __name__ == "__main__":
     participation_df_all = pd.concat(all_participation_data, ignore_index=True)
     print(f"\nCollected participation data: {len(participation_df_all)} cell-day records")
 
-    # Save per-day participation rates
-    csv_path = os.path.join(output_dir, 'cell_participation_rates_per_day.csv')
+    # Save per-day participation rates (intermediate processed data)
+    csv_path = os.path.join(processed_data_dir, 'cell_participation_rates_per_day.csv')
     participation_df_all.to_csv(csv_path, index=False)
     print(f"Saved per-day participation rates to: {csv_path}")
 
@@ -1619,8 +1709,8 @@ if __name__ == "__main__":
 
     aggregated_df = aggregate_across_days(participation_df_all)
 
-    # Save aggregated participation
-    csv_path = os.path.join(output_dir, 'cell_participation_rates_aggregated.csv')
+    # Save aggregated participation (intermediate processed data)
+    csv_path = os.path.join(processed_data_dir, 'cell_participation_rates_aggregated.csv')
     aggregated_df.to_csv(csv_path, index=False)
     print(f"Saved aggregated participation rates to: {csv_path}")
 
@@ -1631,8 +1721,8 @@ if __name__ == "__main__":
 
     merged_df = load_and_match_lmi_data(aggregated_df)
 
-    # Save merged data
-    csv_path = os.path.join(output_dir, 'participation_lmi_merged.csv')
+    # Save merged data (intermediate processed data)
+    csv_path = os.path.join(processed_data_dir, 'participation_lmi_merged.csv')
     merged_df.to_csv(csv_path, index=False)
     print(f"Saved merged data to: {csv_path}")
 
@@ -1731,13 +1821,95 @@ if __name__ == "__main__":
             ).sum()
             print(f"  Cells with reliable data both before and after: {n_both_reliable}")
 
-            # Save
-            csv_path = os.path.join(output_dir, 'cell_participation_rates_by_inflection.csv')
+            # Save (intermediate processed data)
+            csv_path = os.path.join(processed_data_dir, 'cell_participation_rates_by_inflection.csv')
             inflection_participation_df.to_csv(csv_path, index=False)
             print(f"\n  Saved before/after inflection rates to: {csv_path}")
 
-    # Generate visualizations
-    generate_visualizations(merged_df, participation_df_all, output_dir)
+    # Generate visualizations — full population
+    generate_visualizations(merged_df, participation_df_all, output_dir, label='all')
+
+    # =========================================================================
+    # CIRCULAR SHIFT CONTROL: SIGNIFICANTLY REACTIVATED CELLS
+    # =========================================================================
+    if circular_shift_mode != 'skip':
+        print("\n" + "="*60)
+        print("CIRCULAR SHIFT CONTROL: IDENTIFYING SIGNIFICANT CELLS")
+        print("="*60)
+        print(f"  n_shifts={n_shifts}, significance={significance_pctile}th percentile, "
+              f"min_shift={min_shift_frames} frames ({min_shift_frames/sampling_rate:.0f} s)")
+
+        if circular_shift_mode == 'compute':
+            print(f"\n  Computing circular shifts for {len(all_mice_to_process)} mice × "
+                  f"{len(days)} days × {n_shifts} shifts...")
+
+            cs_results = Parallel(n_jobs=n_jobs, verbose=5)(
+                delayed(_process_mouse_circular_shift)(
+                    mouse, n_shifts, all_reactivation_results.get(mouse, None)
+                )
+                for mouse in all_mice_to_process
+            )
+
+            cs_dfs = [df for _, df in cs_results if df is not None]
+            if not cs_dfs:
+                print("  WARNING: Circular shift produced no valid data — skipping.")
+            else:
+                circular_shift_df = pd.concat(cs_dfs, ignore_index=True)
+                circular_shift_df.to_csv(circular_shift_csv, index=False)
+                print(f"  Saved circular shift results to: {circular_shift_csv}")
+
+        else:  # mode == 'plot'
+            if not os.path.exists(circular_shift_csv):
+                print(f"  WARNING: Circular shift CSV not found: {circular_shift_csv}")
+                print("  Run with circular_shift_mode='compute' first — skipping.")
+                cs_dfs = []
+            else:
+                circular_shift_df = pd.read_csv(circular_shift_csv)
+                cs_dfs = [circular_shift_df]
+                print(f"  Loaded {len(circular_shift_df)} cell-day records from: {circular_shift_csv}")
+
+        if cs_dfs:
+            # Identify significantly reactivated cells (day 0 only)
+            day0_cs   = circular_shift_df[circular_shift_df['day'] == 0]
+            sig_cells = day0_cs[day0_cs['significant']][['mouse_id', 'roi']].drop_duplicates()
+
+            print(f"\n  Significant cells (day 0): {len(sig_cells)} / {len(day0_cs)} "
+                  f"({100*len(sig_cells)/max(1, len(day0_cs)):.1f}%)")
+
+            # Diagnostic: fraction significant per LMI category
+            lmi_df_diag = pd.read_csv(os.path.join(io.processed_dir, 'lmi_results.csv'))
+            if 'reward_group' not in lmi_df_diag.columns:
+                mice_rg = db[['mouse_id', 'reward_group']].drop_duplicates()
+                lmi_df_diag['reward_group'] = lmi_df_diag['mouse_id'].map(
+                    dict(mice_rg[['mouse_id', 'reward_group']].values))
+            lmi_df_diag['lmi_category'] = 'neutral'
+            lmi_df_diag.loc[lmi_df_diag['lmi_p'] >= LMI_POSITIVE_THRESHOLD, 'lmi_category'] = 'positive'
+            lmi_df_diag.loc[lmi_df_diag['lmi_p'] <= LMI_NEGATIVE_THRESHOLD, 'lmi_category'] = 'negative'
+            day0_with_lmi = pd.merge(day0_cs,
+                                     lmi_df_diag[['mouse_id', 'roi', 'lmi_category', 'reward_group']],
+                                     on=['mouse_id', 'roi'], how='inner')
+            print("\n  Fraction significant per LMI category (day 0):")
+            for rg in ['R+', 'R-']:
+                for cat in ['positive', 'negative']:
+                    sub   = day0_with_lmi[(day0_with_lmi['reward_group'] == rg) &
+                                          (day0_with_lmi['lmi_category'] == cat)]
+                    n_sig = sub['significant'].sum()
+                    n_tot = len(sub)
+                    pct   = 100 * n_sig / n_tot if n_tot > 0 else 0
+                    print(f"    {rg} {cat}: {n_sig}/{n_tot} ({pct:.1f}%)")
+
+            # Filter main data to significant cells
+            merged_df_sig          = pd.merge(merged_df, sig_cells,
+                                              on=['mouse_id', 'roi'], how='inner')
+            participation_df_sig   = pd.merge(participation_df_all, sig_cells,
+                                              on=['mouse_id', 'roi'], how='inner')
+
+            print(f"\n  Cells retained for sig-cell analysis: "
+                  f"{len(merged_df_sig)} / {len(merged_df)} (with LMI data)")
+
+            # Generate visualizations — significant cells only
+            generate_visualizations(merged_df_sig, participation_df_sig,
+                                    output_dir, label='sig_cells')
 
     print("\n" + "="*60)
     print("ANALYSIS COMPLETE")

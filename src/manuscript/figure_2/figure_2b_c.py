@@ -19,13 +19,16 @@ import src.utils.utils_io as io
 from src.utils.utils_plot import stim_palette, reward_palette
 
 
+OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_2/output'
+
+
 # ============================================================================
 # Panel b: Muscimol inactivation across days
 # ============================================================================
 
 def panel_b_muscimol_timecourse(
     table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_muscimol.csv',
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/behavior',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -230,7 +233,6 @@ def panel_b_muscimol_timecourse(
     sns.despine(trim=True)
 
     # Save figure and data
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     output_file = os.path.join(save_path, f'figure_2b.{save_format}')
@@ -256,7 +258,7 @@ def panel_c_muscimol_barplot(
     table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_muscimol.csv',
     days_of_interest=['muscimol_1', 'muscimol_2', 'muscimol_3'],
     day_labels=['D0', 'D+1', 'D+2'],
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/behavior',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -422,7 +424,6 @@ def panel_c_muscimol_barplot(
                 color='black', fontsize=10)
 
     # Save figure and data
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     output_file = os.path.join(save_path, f'figure_2c.{save_format}')

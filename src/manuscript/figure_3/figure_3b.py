@@ -20,6 +20,9 @@ import src.utils.utils_io as io
 from src.utils.utils_plot import reward_palette
 
 
+OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_3/output'
+
+
 # ============================================================================
 # Data Loading and Processing
 # ============================================================================
@@ -106,7 +109,7 @@ def panel_b1_psth_all_cells(
     days=[-2, -1, 0, 1, 2],
     min_cells=3,
     variance='mice',
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/psth',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -186,7 +189,6 @@ def panel_b1_psth_all_cells(
     sns.despine()
 
     # Save figure and data
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     output_file = os.path.join(
@@ -214,7 +216,7 @@ def panel_b2_psth_projection_types(
     min_cells=3,
     variance='mice',
     projection_types=['wS2', 'wM1'],
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/psth',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -303,7 +305,6 @@ def panel_b2_psth_projection_types(
     sns.despine()
 
     # Save figure and data
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     output_file = os.path.join(

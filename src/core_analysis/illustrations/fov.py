@@ -6,8 +6,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-sys.path.append(r'/Users/aprrenard/repos/NWB_analysis')
-sys.path.append(r'/Users/aprrenard/repos/renard_foustoukos_2025')
+sys.path.append(r'/home/aprenard/repos/NWB_analysis')
+sys.path.append(r'/home/aprenard/repos/fast-learning')
 import src.utils.utils_io as io
 from nwb_wrappers.nwb_reader_functions import get_image_mask
 
@@ -30,11 +30,10 @@ print(f"LMI entries for {MOUSE_ID}: {n_lmi}")
 
 # ---- Load cell image masks from NWB ----
 # Keys: module 'ophys' > ImageSegmentation 'all_cells' > PlaneSegmentation 'my_plane_segmentation'
-image_masks = get_image_mask(NWB_FILE, SEGMENTATION_INFO)
+image_masks = get_image_mask(NWB_FILE)
 n_cells_nwb = len(image_masks)
 print(f"Cells in NWB: {n_cells_nwb}")
 print(f"Match between NWB cells and LMI entries: {n_cells_nwb == n_lmi}")
-
 
 # ---- Load mean image ----
 ops = np.load(OPS_PATH, allow_pickle=True)
@@ -62,13 +61,20 @@ for roi, lmi_val in zip(roi_indices, lmi_values):
 
 
 # ---- Plot ----
-fig, ax = plt.subplots(figsize=(6, 6))
+fig, (ax, cax) = plt.subplots(1, 2, figsize=(7, 6),
+                               gridspec_kw={'width_ratios': [20, 1]})
 ax.imshow(mean_img, cmap='gray', interpolation='none')
-ax.imshow(overlay, interpolation='none', alpha=0.7)
+ax.imshow(overlay, interpolation='none', alpha=0.6)
 ax.axis('off')
 
+lmi_min, lmi_max_val = np.nanmin(lmi_values), np.nanmax(lmi_values)
+sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+cb = fig.colorbar(sm, cax=cax, label='LMI')
+cb.set_ticks([lmi_min, lmi_max_val])
+cb.set_ticklabels([f'{lmi_min:.2f}', f'{lmi_max_val:.2f}'])
+
 plt.tight_layout()
-save_path = os.path.join(io.results_dir, f'fov_{MOUSE_ID}.pdf')
+save_path = os.path.join(io.results_dir, f'fov_{MOUSE_ID}.svg')
 plt.savefig(save_path, dpi=300, bbox_inches='tight')
 plt.show()
 print(f"Saved to {save_path}")

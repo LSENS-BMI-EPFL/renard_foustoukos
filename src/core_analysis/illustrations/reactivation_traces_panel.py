@@ -301,7 +301,6 @@ if __name__ == "__main__":
 
     # Save as both SVG and PNG
     svg_path = os.path.join(OUTPUT_DIR, f'{MOUSE}_correlation_traces_panel.svg')
-    png_path = os.path.join(OUTPUT_DIR, f'{MOUSE}_correlation_traces_panel.png')
 
     fig = plot_example_mouse_correlation_traces_panel(
         r_plus_results,
@@ -313,15 +312,9 @@ if __name__ == "__main__":
         save_path=svg_path
     )
 
-    # Also save as PNG
-    if fig is not None:
-        fig.savefig(png_path, dpi=300, bbox_inches='tight')
-        print(f"  ✓ Saved PNG version: {png_path}")
-
     print("\n" + "="*70)
     print("DONE!")
     print("="*70)
     print(f"\nOutput files:")
     print(f"  • {svg_path}")
-    print(f"  • {png_path}")
     print()

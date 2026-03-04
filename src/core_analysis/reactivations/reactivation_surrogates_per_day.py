@@ -62,9 +62,9 @@ n_map_trials = 40  # Number of mapping t/home/aprenard/repos/fast-learning/src/c
 threshold_dff = None  # 5% dF/F threshold for template cells (use None for all cells)
 
 # Surrogate parameters
-n_surrogates = 100  # Number of surrogate iterations
+n_surrogates = 1000  # Number of surrogate iterations
 min_shift_frames = 0  # Minimum shift frames for circular shift
-percentiles_to_compute = [95, 99, 99.9]  # Percentiles for pointwise thresholds (computed in one go!)
+percentiles_to_compute = [99]  # Percentiles for pointwise thresholds (computed in one go!)
 np.random.seed(42)  # For reproducibility
 
 # Parallel processing
@@ -294,7 +294,7 @@ def analyze_mouse_surrogates(mouse, days=[-2, -1, 0, 1, 2], threshold_dff=0.05,
             # Step 2: Load no-stim trial data from this day only
             folder = os.path.join(io.solve_common_paths('processed_data'), 'mice')
             file_name = 'tensor_xarray_learning_data.nc'
-            xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=True)
+            xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=False)
 
             # Select this day and no-stim trials
             xarray_day = xarray_learning.sel(trial=xarray_learning['day'] == day)

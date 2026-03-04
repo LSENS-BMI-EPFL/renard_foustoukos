@@ -1452,7 +1452,7 @@ def analyze_mouse_reactivation(mouse, days=[-2, -1, 0, 1, 2], verbose=True, thre
             # Step 2: Load learning data
             folder = os.path.join(io.solve_common_paths('processed_data'), 'mice')
             file_name = 'tensor_xarray_learning_data.nc'
-            xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=True)
+            xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=False)
 
             # Select this day
             xarray_day = xarray_learning.sel(trial=xarray_learning['day'] == day)
@@ -2665,7 +2665,7 @@ def calculate_within_day0_performance_delta(mouse, verbose=False):
     file_name = 'tensor_xarray_learning_data.nc'
 
     try:
-        xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=True)
+        xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=False)
     except:
         if verbose:
             print(f"  Warning: Could not load data for {mouse}")
@@ -2932,7 +2932,7 @@ def analyze_reactivation_around_first_hit(mouse, verbose=False):
     file_name = 'tensor_xarray_learning_data.nc'
 
     try:
-        xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=True)
+        xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=False)
     except Exception as e:
         if verbose:
             print(f"  Warning: Could not load data for {mouse}: {e}")
@@ -3069,7 +3069,7 @@ def analyze_reactivation_trial_by_trial(mouse, n_trials_after_hit=60):
     file_name = 'tensor_xarray_learning_data.nc'
 
     try:
-        xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=True)
+        xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=False)
     except:
         return None
 
@@ -3746,17 +3746,20 @@ if __name__ == "__main__":
     else:
         percentile_suffix = f"_p{int(percentile_to_use * 10)}"
 
-    # Create common output directory (no suffix on folder)
-    save_dir = os.path.join(io.results_dir, 'reactivation')
-    os.makedirs(save_dir, exist_ok=True)
-    print(f"\nResults will be saved to: {save_dir}")
+    # Create output directories
+    processed_data_dir = os.path.join(io.processed_dir, 'reactivation')
+    output_dir = os.path.join(io.results_dir, 'reactivation')
+    os.makedirs(processed_data_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"\nProcessed data will be saved to: {processed_data_dir}")
+    print(f"Visualisations will be saved to:  {output_dir}")
 
     # Define results file path - only add percentile suffix when using surrogate thresholds
     if use_surrogate_thresholds is not None:
-        results_file = os.path.join(save_dir, f'reactivation_results{percentile_suffix}.pkl')
+        results_file = os.path.join(processed_data_dir, f'reactivation_results{percentile_suffix}.pkl')
         print(f"Using percentile: {percentile_to_use}th (suffix: {percentile_suffix}) | mode: {use_surrogate_thresholds}")
     else:
-        results_file = os.path.join(save_dir, 'reactivation_results.pkl')
+        results_file = os.path.join(processed_data_dir, 'reactivation_results.pkl')
         percentile_suffix = ''  # No suffix for plots when using fixed threshold
         print(f"use_surrogate_thresholds=None: using fixed threshold_corr={threshold_corr}")
 
@@ -3789,12 +3792,12 @@ if __name__ == "__main__":
 
         # Process R+ mice in parallel
         print(f"\nProcessing R+ mice...")
-        r_plus_results = process_mouse_group(r_plus_mice, 'R+', save_dir, n_jobs=n_jobs,
+        r_plus_results = process_mouse_group(r_plus_mice, 'R+', output_dir, n_jobs=n_jobs,
                                              threshold_dict=threshold_dict, percentile_suffix=percentile_suffix)
 
         # Process R- mice in parallel
         print(f"\nProcessing R- mice...")
-        r_minus_results = process_mouse_group(r_minus_mice, 'R-', save_dir, n_jobs=n_jobs,
+        r_minus_results = process_mouse_group(r_minus_mice, 'R-', output_dir, n_jobs=n_jobs,
                                               threshold_dict=threshold_dict, percentile_suffix=percentile_suffix)
 
         # Save results to file (using results_file defined earlier with conditional suffix)
@@ -3856,19 +3859,19 @@ if __name__ == "__main__":
     print("="*60)
 
     # Figure 1: Session-level reactivation vs performance (R+ vs R-)
-    svg_path = os.path.join(save_dir, f'reactivation_vs_performance{percentile_suffix}.svg')
+    svg_path = os.path.join(output_dir, f'reactivation_vs_performance{percentile_suffix}.svg')
     plot_session_level_across_mice(r_plus_results, r_minus_results, svg_path)
 
     # Figure 2: Direct R+ vs R- comparison with statistics
-    svg_path = os.path.join(save_dir, f'across_mice_group_comparison_per_day{percentile_suffix}.svg')
+    svg_path = os.path.join(output_dir, f'across_mice_group_comparison_per_day{percentile_suffix}.svg')
     plot_group_comparison_per_day(r_plus_results, r_minus_results, svg_path)
 
     # Figure 2b: Threshold comparison across days (R+ vs R-)
-    svg_path = os.path.join(save_dir, f'threshold_comparison_per_day{percentile_suffix}.svg')
+    svg_path = os.path.join(output_dir, f'threshold_comparison_per_day{percentile_suffix}.svg')
     plot_threshold_comparison_per_day(r_plus_results, r_minus_results, svg_path)
 
     # Figure 3: Reactivation frequency vs performance improvement (day 0 → day +1)
-    svg_path = os.path.join(save_dir, f'reactivation_vs_performance_delta{percentile_suffix}.svg')
+    svg_path = os.path.join(output_dir, f'reactivation_vs_performance_delta{percentile_suffix}.svg')
     plot_reactivation_vs_performance_delta(r_plus_results, r_minus_results, svg_path)
 
     # Generate time-above-threshold plots (SVG)
@@ -3878,23 +3881,23 @@ if __name__ == "__main__":
 
     # Plot 1: Percent time above per day (two-panel plot with R+ and R-)
     if len(r_plus_results) > 0 or len(r_minus_results) > 0:
-        svg_path = os.path.join(save_dir, f'percent_time_above_per_day{percentile_suffix}.svg')
+        svg_path = os.path.join(output_dir, f'percent_time_above_per_day{percentile_suffix}.svg')
         print(f"\nGenerating two-panel time-above per day plot...")
         plot_percent_time_above_per_day(r_plus_results, r_minus_results, svg_path)
 
     # Plot 2: Mean template correlation per day (R+ vs R-)
     if len(r_plus_results) > 0 or len(r_minus_results) > 0:
-        svg_path = os.path.join(save_dir, f'mean_correlation_per_day{percentile_suffix}.svg')
+        svg_path = os.path.join(output_dir, f'mean_correlation_per_day{percentile_suffix}.svg')
         print(f"\nGenerating mean correlation per day plot...")
         plot_mean_correlation_per_day(r_plus_results, r_minus_results, svg_path)
 
     # Plot 3: Percent time above vs performance (combined R+ and R-)
     if len(r_plus_results) > 0 or len(r_minus_results) > 0:
-        svg_path = os.path.join(save_dir, f'percent_time_above_vs_performance{percentile_suffix}.svg')
+        svg_path = os.path.join(output_dir, f'percent_time_above_vs_performance{percentile_suffix}.svg')
         print(f"\nGenerating time-above vs performance plot...")
         plot_percent_time_above_vs_performance(r_plus_results, r_minus_results, svg_path)
 
-    print(f"\nTime-above-threshold plots saved to: {save_dir}")
+    print(f"\nTime-above-threshold plots saved to: {output_dir}")
 
     # # Figure 8 & 9: Within-day-0 performance improvement vs reactivation frequency
     # # These analyses require loading results from specific trial types
@@ -3950,8 +3953,8 @@ if __name__ == "__main__":
     print(f"\nProcessed {len(r_plus_results)} R+ mice")
     print(f"Processed {len(r_minus_results)} R- mice")
     print(f"Total: {len(r_plus_results) + len(r_minus_results)} mice")
-    print(f"\nPDFs saved to: {save_dir}")
-    print(f"SVG figures saved to: {save_dir}")
+    print(f"\nPDFs and SVG figures saved to: {output_dir}")
+    print(f"Results pkl saved to: {processed_data_dir}")
 
 
 
@@ -3972,7 +3975,7 @@ if __name__ == "__main__":
 # # Load learning data
 # folder = os.path.join(io.solve_common_paths('processed_data'), 'mice')
 # file_name = 'tensor_xarray_learning_data.nc'
-# xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=True)
+# xarray_learning = utils_imaging.load_mouse_xarray(mouse, folder, file_name, substracted=False)
 
 # # Select trials for day 0
 # xarray_day = xarray_learning.sel(trial=xarray_learning['day'] == day)

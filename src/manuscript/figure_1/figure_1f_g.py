@@ -19,13 +19,16 @@ import src.utils.utils_io as io
 from src.utils.utils_plot import behavior_palette
 
 
+OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_1/output'
+
+
 # ============================================================================
 # Panel f: Performance across training days
 # ============================================================================
 
 def panel_f_performance_across_days(
     table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_imagingmice_table_5days_cut.csv',
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/behavior',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -134,7 +137,6 @@ def panel_f_performance_across_days(
         axis.set_tick_params(width=1)
 
     # Save figure and data
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     output_file = os.path.join(save_path, f'figure_1f.{save_format}')
@@ -156,7 +158,7 @@ def panel_f_performance_across_days(
 def panel_g_performance_barplot(
     table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_imagingmice_table_5days_cut.csv',
     days_of_interest=[0, 1, 2],
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/behavior',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -276,7 +278,6 @@ def panel_g_performance_barplot(
                     color='black', fontsize=14)
 
     # Save figure and data
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     output_file = os.path.join(save_path, f'figure_1g.{save_format}')

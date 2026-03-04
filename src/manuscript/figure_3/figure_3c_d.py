@@ -18,6 +18,8 @@ sys.path.append('/home/aprenard/repos/fast-learning')
 import src.utils.utils_imaging as utils_imaging
 import src.utils.utils_io as io
 
+OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_3/output'
+
 
 # ============================================================================
 # Data Loading and Processing
@@ -137,7 +139,7 @@ def panel_c_pre_post_all_cells(
     days_selected=[-2, -1, 1, 2],
     min_cells=3,
     variance='mice',
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/psth',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -276,7 +278,6 @@ def panel_c_pre_post_all_cells(
     plt.tight_layout()
 
     # Save figure and data
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     output_file = os.path.join(
@@ -310,7 +311,7 @@ def panel_d_pre_post_projection_types(
     min_cells=3,
     variance='mice',
     projection_types=['wS2', 'wM1'],
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/psth',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -538,7 +539,6 @@ def panel_d_pre_post_projection_types(
     plt.tight_layout()
 
     # Save figure and data
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     output_file = os.path.join(

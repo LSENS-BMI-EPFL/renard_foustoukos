@@ -19,6 +19,9 @@ import src.utils.utils_io as io
 from src.utils.utils_plot import reward_palette
 
 
+OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_3/output'
+
+
 # ============================================================================
 # Data Loading and Processing
 # ============================================================================
@@ -85,7 +88,7 @@ def load_and_process_lmi_data(
 def panel_e_lmi_proportions(
     lmi_prop=None,
     lmi_prop_ct=None,
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/cell_proportions',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -221,7 +224,6 @@ def panel_e_lmi_proportions(
     plt.tight_layout()
 
     # Save figure and data
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     output_file = os.path.join(save_path, f'figure_3e.{save_format}')
@@ -251,7 +253,7 @@ def panel_e_lmi_proportions(
 def panel_f_lmi_distributions(
     lmi_df=None,
     n_bins=30,
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/cell_proportions',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -321,7 +323,6 @@ def panel_f_lmi_distributions(
     plt.tight_layout()
 
     # Save figure
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     output_file = os.path.join(save_path, f'figure_3f.{save_format}')
@@ -350,11 +351,15 @@ def panel_f_lmi_distributions(
 
     ks_results_df = pd.DataFrame(ks_results)
 
-    # Save statistics
+    # Save data and statistics
+    data_file = os.path.join(save_path, 'figure_3f_data.csv')
+    lmi_df[['mouse_id', 'reward_group', 'cell_type', 'lmi', 'lmi_p']].to_csv(data_file, index=False)
+
     stats_file = os.path.join(save_path, 'figure_3f_stats.csv')
     ks_results_df.to_csv(stats_file, index=False)
 
     print(f"Figure 3f saved to: {output_file}")
+    print(f"Figure 3f data saved to: {data_file}")
     print(f"Figure 3f statistics saved to: {stats_file}")
 
     return ks_results_df

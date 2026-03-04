@@ -19,6 +19,9 @@ import src.utils.utils_io as io
 from src.utils.utils_plot import stim_palette
 
 
+OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_1/output'
+
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -80,7 +83,7 @@ def generate_panel(
     session_date='29112020',
     session_time='103331',
     data_root='/mnt/lsens-data',
-    save_path='/mnt/lsens-analysis/Anthony_Renard/analysis_output/fast-learning/illustrations/lick_raster',
+    save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
@@ -198,13 +201,23 @@ def generate_panel(
     sns.despine()
 
     # Save figure
-    save_path = io.adjust_path_to_host(save_path)
     os.makedirs(save_path, exist_ok=True)
     output_file = os.path.join(save_path, f'figure_1c.{save_format}')
     plt.savefig(output_file, format=save_format, dpi=dpi, bbox_inches='tight')
     plt.close()
-
     print(f"Figure 1c saved to: {output_file}")
+
+    # Save data: one row per lick event, time aligned to stimulus onset
+    lick_events = []
+    for _, row in df_lick_raster.iterrows():
+        for t in row['lick_times']:
+            lick_events.append({
+                'trialnumber': row['trialnumber'],
+                'trial_type': row['trial_type'],
+                'lick_time_s': t - 2,  # aligned to stimulus onset
+            })
+    pd.DataFrame(lick_events).to_csv(os.path.join(save_path, 'figure_1c_data.csv'), index=False)
+    print(f"Figure 1c data saved to: {os.path.join(save_path, 'figure_1c_data.csv')}")
 
 
 # ============================================================================
