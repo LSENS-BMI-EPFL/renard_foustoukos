@@ -37,7 +37,7 @@ TIME_WINDOW = 180  # seconds
 HEATMAP_CMAP = 'RdBu_r'
 
 RESULTS_DIR = os.path.join(io.processed_dir, 'reactivation')
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_4/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_4', 'output')
 
 
 # ============================================================================
@@ -51,8 +51,8 @@ def panel_h_reactivation_heatmap(
     day=DAY,
     sampling_rate=SAMPLING_RATE,
     time_window=TIME_WINDOW,
-    sort_by='template',
-    sig_only=False,
+    sort_by='participation',
+    top_n=20,
     results_dir=RESULTS_DIR,
     filename='figure_4h',
     output_dir=OUTPUT_DIR,
@@ -64,7 +64,7 @@ def panel_h_reactivation_heatmap(
 
     Args:
         sort_by: 'template' or 'participation' — cell ordering.
-        sig_only: If True, restrict to significantly-participating cells.
+        top_n: If set, restrict to the top N cells by participation rate.
         results_dir: Directory containing all result CSV/pkl files.
         filename: Output filename stem (without extension).
     """
@@ -118,19 +118,6 @@ def panel_h_reactivation_heatmap(
         for r in roi_ids_orig
     ])
 
-    # Optionally restrict to significantly-participating cells
-    if sig_only:
-        sig_df = pd.read_csv(os.path.join(results_dir,
-                                           'circular_shift_significant_participation.csv'))
-        sig_rois = set(sig_df[sig_df['mouse_id'] == mouse]['roi'].values)
-        cell_mask = np.array([r in sig_rois for r in roi_ids_orig])
-        neural_data = neural_data[cell_mask, :]
-        template = template[cell_mask]
-        lmi_orig = lmi_orig[cell_mask]
-        part_orig = part_orig[cell_mask]
-        roi_ids_orig = roi_ids_orig[cell_mask]
-        n_cells = neural_data.shape[0]
-
     # Sort cells
     if sort_by == 'participation':
         key = np.where(np.isnan(part_orig), -np.inf, part_orig)
@@ -143,6 +130,14 @@ def panel_h_reactivation_heatmap(
     lmi_values = lmi_orig[sort_idx]
     part_values = part_orig[sort_idx]
 
+    # Restrict to top-N cells by participation
+    if top_n is not None:
+        neural_data_sorted = neural_data_sorted[:top_n, :]
+        template_sorted = template_sorted[:top_n]
+        lmi_values = lmi_values[:top_n]
+        part_values = part_values[:top_n]
+    n_cells = neural_data_sorted.shape[0]
+
     # Colour ranges — symmetric so white = 0
     act_data_min = float(np.percentile(neural_data_sorted, 2))
     act_data_max = float(np.percentile(neural_data_sorted, 99))
@@ -150,9 +145,8 @@ def panel_h_reactivation_heatmap(
     vmin_act = -vmax_act
     neural_data_display = np.clip(neural_data_sorted, act_data_min, act_data_max)
 
-    t_abs_max = max(abs(float(np.nanmin(template_sorted))),
-                    abs(float(np.nanmax(template_sorted))), 1e-6)
-    vmin_tmpl, vmax_tmpl = -t_abs_max, t_abs_max
+    vmin_tmpl = 0.0
+    vmax_tmpl = max(float(np.nanmax(template_sorted)), 1e-6)
 
     # Build figure
     fig = plt.figure(figsize=(11, 6))
@@ -160,20 +154,20 @@ def panel_h_reactivation_heatmap(
         3, 5,
         figure=fig,
         width_ratios=[1, 1, 1, 14, 0.4],
-        height_ratios=[1, 14, 0.8],
+        height_ratios=[3, 14, 0.8],
         wspace=0.03,
         hspace=0.04,
     )
 
     ax_lmi = fig.add_subplot(gs[1, 0])
-    ax_part = fig.add_subplot(gs[1, 1])
-    ax_template = fig.add_subplot(gs[1, 2])
+    ax_template = fig.add_subplot(gs[1, 1])
+    ax_part = fig.add_subplot(gs[1, 2])
     ax_heatmap = fig.add_subplot(gs[1, 3])
     ax_cbar = fig.add_subplot(gs[1, 4])
     ax_events = fig.add_subplot(gs[0, 3], sharex=ax_heatmap)
     ax_cbar_lmi = fig.add_subplot(gs[2, 0])
-    ax_cbar_part = fig.add_subplot(gs[2, 1])
-    ax_cbar_tmpl = fig.add_subplot(gs[2, 2])
+    ax_cbar_tmpl = fig.add_subplot(gs[2, 1])
+    ax_cbar_part = fig.add_subplot(gs[2, 2])
 
     for _ax in [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1]),
                 fig.add_subplot(gs[0, 2]), fig.add_subplot(gs[0, 4]),
@@ -195,14 +189,21 @@ def panel_h_reactivation_heatmap(
     ax_heatmap.spines['right'].set_visible(False)
     ax_heatmap.spines['left'].set_visible(False)
 
-    # Events panel
-    ax_events.set_ylim(0, 1)
+    # Events panel — correlation trace with threshold and event markers
+    t_corr = np.arange(n_frames) / sampling_rate
+    ax_events.plot(t_corr, correlations, 'k-', linewidth=0.7, alpha=0.9)
+    ax_events.axhline(threshold, color='#e84040', linestyle='--', linewidth=0.8, alpha=0.7)
     for ev in events:
-        ax_events.axvline(ev / sampling_rate, color='#e84040', linewidth=0.8, alpha=0.9)
-    ax_events.set_xticks([])
+        ax_events.axvline(ev / sampling_rate, color='#e84040', linewidth=0.6, alpha=0.5)
+    corr_min, corr_max = float(np.nanmin(correlations)), float(np.nanmax(correlations))
+    corr_pad = (corr_max - corr_min) * 0.05
+    ax_events.set_ylim(corr_min - corr_pad, corr_max + corr_pad)
     ax_events.set_yticks([])
-    for sp in ax_events.spines.values():
-        sp.set_visible(False)
+    ax_events.xaxis.set_visible(False)
+    ax_events.spines['top'].set_visible(False)
+    ax_events.spines['right'].set_visible(False)
+    ax_events.spines['bottom'].set_visible(False)
+    ax_events.spines['left'].set_visible(False)
     ax_events.set_title(
         f'{mouse} ({reward_group})  |  Day {day}  |  {len(events)} reactivations',
         fontsize=10, fontweight='bold', pad=4,
@@ -223,13 +224,13 @@ def panel_h_reactivation_heatmap(
             sp.set_visible(False)
         return im
 
-    im_tmpl = _strip(ax_template, template_sorted, HEATMAP_CMAP,
+    im_tmpl = _strip(ax_template, template_sorted, 'Reds',
                      'Template', vmin=vmin_tmpl, vmax=vmax_tmpl)
     im_lmi = _strip(ax_lmi, lmi_values, HEATMAP_CMAP, 'LMI', vmin=-1, vmax=1)
     im_part = _strip(ax_part, part_values, 'Reds', 'Particip.\nrate', vmin=0, vmax=1)
 
     # Colourbars
-    tmpl_data_min = float(np.nanmin(template_sorted))
+    tmpl_data_min = 0.0
     tmpl_data_max = float(np.nanmax(template_sorted))
 
     cb_act = fig.colorbar(ax_heatmap.images[0], cax=ax_cbar)
@@ -241,8 +242,8 @@ def panel_h_reactivation_heatmap(
 
     for im, cax, label, dmin, dmax in [
         (im_lmi,  ax_cbar_lmi,  'LMI',  -1,            1),
-        (im_part, ax_cbar_part, 'Rate',  0,             1),
         (im_tmpl, ax_cbar_tmpl, 'dF/F', tmpl_data_min, tmpl_data_max),
+        (im_part, ax_cbar_part, 'Rate',  0,             1),
     ]:
         cb = fig.colorbar(im, cax=cax, orientation='horizontal')
         cb.ax.set_xlim(dmin, dmax)
@@ -263,7 +264,7 @@ def panel_h_reactivation_heatmap(
 # ============================================================================
 
 if __name__ == '__main__':
-    results_file = os.path.join(RESULTS_DIR, 'reactivation_results.pkl')
+    results_file = os.path.join(RESULTS_DIR, 'reactivation_results_p99.pkl')
     print(f"Loading reactivation results from: {results_file}")
     if not os.path.exists(results_file):
         raise FileNotFoundError(
@@ -278,14 +279,9 @@ if __name__ == '__main__':
     r_minus_results = results_data['r_minus_results']
     print(f"Loaded results for {len(r_plus_results)} R+ mice and {len(r_minus_results)} R- mice")
 
-    for sort_by, sig_only in [('template',      False),
-                               ('participation', False),
-                               ('template',      True),
-                               ('participation', True)]:
-        suffix = f'sort_{sort_by}' + ('_sig' if sig_only else '')
-        panel_h_reactivation_heatmap(
-            r_plus_results, r_minus_results,
-            sort_by=sort_by,
-            sig_only=sig_only,
-            filename=f'figure_4h_{suffix}',
-        )
+    panel_h_reactivation_heatmap(
+        r_plus_results, r_minus_results,
+        sort_by='participation',
+        top_n=20,
+        filename='figure_4h',
+    )

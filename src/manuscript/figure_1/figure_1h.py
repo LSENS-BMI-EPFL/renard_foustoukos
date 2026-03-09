@@ -21,7 +21,7 @@ import src.utils.utils_io as io
 from src.utils.utils_plot import reward_palette
 
 
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_1/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_1', 'output')
 
 
 # ============================================================================
@@ -29,7 +29,7 @@ OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/
 # ============================================================================
 
 def generate_panel(
-    table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_imagingmice_table_5days_cut_with_learning_curves.csv',
+    table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_imagingmice_table_5days_cut_with_learning_curves.csv'),
     n_trials=120,
     save_path=OUTPUT_DIR,
     save_format='svg',

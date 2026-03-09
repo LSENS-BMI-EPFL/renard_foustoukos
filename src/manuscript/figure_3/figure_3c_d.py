@@ -18,7 +18,7 @@ sys.path.append('/home/aprenard/repos/fast-learning')
 import src.utils.utils_imaging as utils_imaging
 import src.utils.utils_io as io
 
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_3/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_3', 'output')
 
 
 # ============================================================================

@@ -18,7 +18,7 @@ from src.utils.utils_plot import behavior_palette
 from src.utils.utils_behavior import plot_single_session
 
 
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_1/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_1', 'output')
 
 
 # ============================================================================
@@ -29,7 +29,7 @@ def generate_panel(
     mouse_ids=['GF305', 'AR180'],
     days=[-2, -1, 0, 1, 2],
     max_trials=180,
-    table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_imagingmice_table_5days_cut.csv',
+    table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_imagingmice_table_5days_cut.csv'),
     save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300

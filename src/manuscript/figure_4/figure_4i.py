@@ -27,8 +27,7 @@ SAMPLING_RATE = 30
 TIME_WINDOW_PER_DAY = 180  # seconds; None = full trace
 
 RESULTS_FILE = os.path.join(io.processed_dir, 'reactivation', 'reactivation_results_p99.pkl')
-
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_4/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_4', 'output')
 
 
 # ============================================================================

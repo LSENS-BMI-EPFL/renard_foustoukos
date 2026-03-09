@@ -19,7 +19,7 @@ import src.utils.utils_io as io
 from src.utils.utils_plot import stim_palette, reward_palette
 
 
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_2/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_2', 'output')
 
 
 # ============================================================================
@@ -27,7 +27,7 @@ OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/
 # ============================================================================
 
 def panel_b_muscimol_timecourse(
-    table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_muscimol.csv',
+    table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_muscimol.csv'),
     save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
@@ -255,7 +255,7 @@ def panel_b_muscimol_timecourse(
 
 def panel_c_muscimol_barplot(
     data=None,
-    table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_muscimol.csv',
+    table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_muscimol.csv'),
     days_of_interest=['muscimol_1', 'muscimol_2', 'muscimol_3'],
     day_labels=['D0', 'D+1', 'D+2'],
     save_path=OUTPUT_DIR,

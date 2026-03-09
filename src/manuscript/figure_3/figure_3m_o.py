@@ -42,7 +42,7 @@ BASELINE_WIN = (-1, 0)
 DAYS = [-2, -1, 0, 1, 2]
 N_MAP_TRIALS = 40
 
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_3/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_3', 'output')
 
 
 # ============================================================================

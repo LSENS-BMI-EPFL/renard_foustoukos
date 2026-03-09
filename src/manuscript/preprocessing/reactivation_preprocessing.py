@@ -104,7 +104,7 @@ def create_whisker_template(mouse, day, threshold_dff=THRESHOLD_DFF, verbose=Fal
     """Create whisker response template from mapping data for a specific day."""
     folder = os.path.join(io.solve_common_paths('processed_data'), 'mice')
     xarray_map = utils_imaging.load_mouse_xarray(
-        mouse, folder, 'tensor_xarray_mapping_data.nc', substracted=False)
+        mouse, folder, 'tensor_xarray_mapping_data.nc', substracted=True)
 
     xarray_day = xarray_map.sel(trial=xarray_map['day'] == day)
     xarray_day = xarray_day.groupby('day').apply(

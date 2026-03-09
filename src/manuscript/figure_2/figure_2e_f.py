@@ -19,7 +19,7 @@ import src.utils.utils_io as io
 from src.utils.utils_plot import stim_palette
 
 
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_2/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_2', 'output')
 
 
 # ============================================================================
@@ -27,7 +27,7 @@ OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/
 # ============================================================================
 
 def panel_e_opto_timecourse(
-    table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_opto_learning.csv',
+    table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_opto_learning.csv'),
     save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
@@ -269,7 +269,7 @@ def panel_e_opto_timecourse(
 
 def panel_f_opto_barplot(
     data=None,
-    table_path='//sv-nas1.rcp.epfl.ch/Petersen-Lab/analysis/Anthony_Renard/data_processed/behavior/behavior_opto_learning.csv',
+    table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_opto_learning.csv'),
     days_of_interest=['opto', 'recovery_1'],
     day_labels=['D0', 'D+1'],
     save_path=OUTPUT_DIR,

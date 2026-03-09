@@ -1670,10 +1670,15 @@ for ax, rg, color in zip(axes, ['R+', 'R-'], [reward_palette[1], reward_palette[
     ax.set_title(f'{rg}  (n learned = {n_learned} / {n_total})')
     ax.set_xlabel('Learning trial (whisker)')
     ax.set_ylabel('Number of mice')
+    ax.set_ylim([0, 6])
+    if rg == 'R+':
+        ax.set_xlim([0, 70])
+    else:
+        ax.set_xlim([0, 120])
     sns.despine(ax=ax)
 fig.tight_layout()
 fig.savefig(
-    os.path.join(output_dir, 'learning_trial_distribution_day0.svg'),
+    os.path.join(output_dir, 'behavior', 'learning_trial_distribution_day0.svg'),
     format='svg', dpi=300
 )
 

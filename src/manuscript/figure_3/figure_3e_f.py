@@ -19,7 +19,7 @@ import src.utils.utils_io as io
 from src.utils.utils_plot import reward_palette
 
 
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_3/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_3', 'output')
 
 
 # ============================================================================
@@ -46,8 +46,7 @@ def load_and_process_lmi_data(
     """
 
     # Load LMI data
-    processed_folder = io.solve_common_paths('processed_data')
-    lmi_df = pd.read_csv(os.path.join(processed_folder, lmi_file))
+    lmi_df = pd.read_csv(os.path.join(io.processed_dir, lmi_file))
 
     # Get list of imaging mice
     _, _, mice, _ = io.select_sessions_from_db(

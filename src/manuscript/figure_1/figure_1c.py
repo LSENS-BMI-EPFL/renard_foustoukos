@@ -19,7 +19,7 @@ import src.utils.utils_io as io
 from src.utils.utils_plot import stim_palette
 
 
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_1/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_1', 'output')
 
 
 # ============================================================================

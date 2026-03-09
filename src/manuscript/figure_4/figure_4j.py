@@ -31,7 +31,7 @@ from src.utils.utils_plot import reward_palette
 DAYS = [-2, -1, 0, 1, 2]
 
 RESULTS_FILE = os.path.join(io.processed_dir, 'reactivation', 'reactivation_results_p99.pkl')
-OUTPUT_DIR = '/Volumes/Petersen-Lab/analysis/Anthony_Renard/manuscripts/outputs/figure_4/output'
+OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_4', 'output')
 
 
 # ============================================================================
@@ -130,20 +130,20 @@ def panel_j_reactivation_rate(
                 hue_order=['R+', 'R-'],
                 alpha=0.7, edgecolor='black', ax=ax)
 
-    # Individual mouse trajectories
-    bar_width = 0.35
-    group_offsets = {'R+': -bar_width / 2, 'R-': bar_width / 2}
-    x_positions = {day: idx for idx, day in enumerate(days_sorted)}
+    # # Individual mouse trajectories
+    # bar_width = 0.35
+    # group_offsets = {'R+': -bar_width / 2, 'R-': bar_width / 2}
+    # x_positions = {day: idx for idx, day in enumerate(days_sorted)}
 
-    for mouse in df['mouse_id'].unique():
-        if mouse == '':
-            continue
-        mouse_data = df[df['mouse_id'] == mouse].sort_values('Day')
-        group = mouse_data['reward_group'].iloc[0]
-        mouse_x = [x_positions[d] + group_offsets[group] for d in mouse_data['Day']]
-        mouse_y = mouse_data['Frequency'].values
-        color = reward_palette[1] if group == 'R+' else reward_palette[0]
-        ax.plot(mouse_x, mouse_y, '-', color=color, linewidth=0.8, alpha=0.5, zorder=5)
+    # for mouse in df['mouse_id'].unique():
+    #     if mouse == '':
+    #         continue
+    #     mouse_data = df[df['mouse_id'] == mouse].sort_values('Day')
+    #     group = mouse_data['reward_group'].iloc[0]
+    #     mouse_x = [x_positions[d] + group_offsets[group] for d in mouse_data['Day']]
+    #     mouse_y = mouse_data['Frequency'].values
+    #     color = reward_palette[1] if group == 'R+' else reward_palette[0]
+    #     ax.plot(mouse_x, mouse_y, '-', color=color, linewidth=0.8, alpha=0.5, zorder=5)
 
     # Significance stars
     y_max = df['Frequency'].max()
@@ -167,6 +167,7 @@ def panel_j_reactivation_rate(
     ax.set_xlabel('Day', fontsize=10)
     ax.set_ylabel('Reactivation rate (events/min)', fontsize=10)
     ax.legend(title='', fontsize=9)
+    ax.set_ylim(0, 20)
     sns.despine()
     plt.tight_layout()
 

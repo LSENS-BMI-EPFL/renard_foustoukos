@@ -371,15 +371,16 @@ def compute_learning_curves(table):
             table.loc[(table.session_id==session) & (table.no_stim==1), 'learning_curve_ns_ci_high'] = p_high_ns.astype(float)
 
     return table
-        
 
-def compute_learning_trial(table, n_consecutive_trials=5):
-    
+
+def compute_learning_trial(table, n_consecutive_trials=10):
+
     for session in table.session_id.unique():
         if table.loc[(table.session_id == session), 'day'].values[0] != 0:
             continue
+        reward_group = table.loc[(table.session_id == session), 'reward_group'].values[0]
         print(f'Processing session {session}...')
-        
+
         print(f'Defining learning trial for session {session}...')
         data_w = table[(table.session_id == session) & (table.whisker_stim==1)].reset_index(drop=True)
         data_ns = table[(table.session_id == session) & (table.no_stim==1)].reset_index(drop=True)
@@ -388,7 +389,7 @@ def compute_learning_trial(table, n_consecutive_trials=5):
         p_low_w = data_w.learning_curve_w_ci_low.values
         p_high_w = data_w.learning_curve_w_ci_high.values
         p_mean_ns = data_ns.learning_curve_ns.values
-        
+
         # Define bounds and get no stim timestamps in range
         timestamps_no_stim = data_ns.start_time.values
         timestamps_whisker = data_w['start_time'].values
@@ -403,18 +404,27 @@ def compute_learning_trial(table, n_consecutive_trials=5):
         interp_p_far = interp_func(timestamps_whisker)
 
         # Identify learning trial
-        trials_above_chance = np.where(p_low_w > interp_p_far)[0]
-        trials_above_chance = data_w.loc[trials_above_chance, 'trial_w'].values
-        # Find the first index where 5 consecutive trials are above chance
         learning_trial = np.nan
-        for idx in range(len(trials_above_chance)):
-            # Check if there are at least 5 trials left
-            if idx + n_consecutive_trials-1 < len(trials_above_chance):
-                # Check if the next 5 trials are consecutive
-                if np.all(np.diff(trials_above_chance[idx:idx+n_consecutive_trials]) == 1):
-                    learning_trial = trials_above_chance[idx]
-                    break
-        
+        if reward_group == 'R+':
+            # R+: learning when whisker perf lower CI bound exceeds false alarm rate
+            trials_above_chance = np.where(p_low_w > interp_p_far)[0]
+            trials_above_chance = data_w.loc[trials_above_chance, 'trial_w'].values
+            for idx in range(len(trials_above_chance)):
+                if idx + n_consecutive_trials-1 < len(trials_above_chance):
+                    if np.all(np.diff(trials_above_chance[idx:idx+n_consecutive_trials]) == 1):
+                        learning_trial = trials_above_chance[idx]
+                        break
+        elif reward_group == 'R-':
+            # R-: learning when whisker perf is no longer different from false alarm rate,
+            # i.e. the false alarm rate falls within the whisker CI [p_low_w, p_high_w]
+            trials_at_chance = np.where((interp_p_far >= p_low_w) & (interp_p_far <= p_high_w))[0]
+            trials_at_chance = data_w.loc[trials_at_chance, 'trial_w'].values
+            for idx in range(len(trials_at_chance)):
+                if idx + n_consecutive_trials-1 < len(trials_at_chance):
+                    if np.all(np.diff(trials_at_chance[idx:idx+n_consecutive_trials]) == 1):
+                        learning_trial = trials_at_chance[idx]
+                        break
+
         table.loc[(table.session_id==session) & (table.whisker_stim==1), 'learning_curve_chance'] = interp_p_far
         table.loc[(table.session_id==session), 'learning_trial'] = learning_trial
     return table
