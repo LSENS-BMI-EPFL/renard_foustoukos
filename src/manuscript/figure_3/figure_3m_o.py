@@ -244,20 +244,42 @@ def train_and_save_decoder_weights(
                 scaler.transform(d.values[:, post_mask].T)))
             sign_flip = -1 if mean_dec_pre > mean_dec_post else 1
 
+            roi_ids = d['roi'].values if 'roi' in d.coords else d['cell'].values
             weights[mouse] = {
                 'scaler': scaler,
                 'clf': clf,
                 'sign_flip': sign_flip,
                 'reward_group': reward_group,
+                'roi': roi_ids,
             }
             print(f'  {mouse} ({reward_group}): decoder trained '
                   f'({X_train.shape[1]} cells, sign_flip={sign_flip})')
 
     os.makedirs(results_dir, exist_ok=True)
+
+    # Save full sklearn objects as pickle
     out_path = os.path.join(results_dir, 'decoder_weights.pkl')
     with open(out_path, 'wb') as f:
         pickle.dump(weights, f)
     print(f'Decoder weights saved: {out_path}  ({len(weights)} mice)')
+
+    # Save per-cell weights as CSV for downstream analyses
+    rows = []
+    for mouse, w in weights.items():
+        coefs = w['clf'].coef_.flatten()
+        for roi, coef in zip(w['roi'], coefs):
+            rows.append({
+                'mouse_id': mouse,
+                'roi': roi,
+                'reward_group': w['reward_group'],
+                'classifier_weight_raw': coef,
+                'classifier_weight': coef * w['sign_flip'],
+                'sign_flip': w['sign_flip'],
+            })
+    csv_path = os.path.join(results_dir, 'classifier_weights.csv')
+    pd.DataFrame(rows).to_csv(csv_path, index=False)
+    print(f'Classifier weights CSV saved: {csv_path}')
+
     return weights
 
 
@@ -310,8 +332,6 @@ def panel_m_decoding_accuracy(
 
     # Statistics
     stat_between, p_between = mannwhitneyu(accs_rew, accs_nonrew, alternative='two-sided')
-    stat_rew, p_rew = wilcoxon(accs_rew, chance_rew, alternative='two-sided')
-    stat_nonrew, p_nonrew = wilcoxon(accs_nonrew, chance_nonrew, alternative='two-sided')
 
     stats_rows = [
         {
@@ -321,20 +341,7 @@ def panel_m_decoding_accuracy(
             'p_value': p_between,
             'significance': _significance_stars(p_between),
         },
-        {
-            'test': 'Wilcoxon signed-rank',
-            'comparison': 'R+ accuracy vs chance',
-            'statistic': stat_rew,
-            'p_value': p_rew,
-            'significance': _significance_stars(p_rew),
-        },
-        {
-            'test': 'Wilcoxon signed-rank',
-            'comparison': 'R- accuracy vs chance',
-            'statistic': stat_nonrew,
-            'p_value': p_nonrew,
-            'significance': _significance_stars(p_nonrew),
-        },
+
     ]
 
     # Plot

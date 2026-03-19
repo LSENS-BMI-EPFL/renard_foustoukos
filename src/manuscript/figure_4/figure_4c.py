@@ -1,11 +1,11 @@
 """
-Figure 4c: Progressive learning during Day 0 — behaviour and decoder value,
-per mouse (multi-page PDF).
+Figure 4c: Progressive learning during Day 0 — population average behaviour
+and decoder value, R+ vs R-.
 
-One page per mouse, two-row layout:
-  Row 1: Behavioural learning curve across Day 0 whisker trials.
-  Row 2: Decoder decision value applied to Day 0 whisker trials using a
-         sliding window.
+Two-row × two-column layout:
+  Row 1: Behavioural learning curve averaged across mice (Day 0 whisker trials).
+  Row 2: Mean decoder decision value averaged across mice (sliding window on
+         Day 0 whisker trials).
 
 Decoder weights (trained on Days -2/-1 vs +1/+2 mapping trials) are loaded
 from RESULTS_DIR/decoder_weights.pkl, produced by figure_3m_o.py.
@@ -19,7 +19,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib.backends.backend_pdf import PdfPages
 
 sys.path.append(r'/home/aprenard/repos/NWB_analysis')
 sys.path.append(r'/home/aprenard/repos/fast-learning')
@@ -76,91 +75,77 @@ for mouse in weights:
 # Apply decoder (sliding window)
 # ============================================================================
 
-def apply_decoder(weights, xarr, mouse, window_size=10, step_size=1):
-    w = weights[mouse]
+results = []
+for mouse, w in weights.items():
+    xarr = xarrays_learning[mouse]
     scaler, clf, sign_flip = w['scaler'], w['clf'], w['sign_flip']
     n_trials = xarr.sizes['trial']
-    rows = []
     for start_idx in range(0, max(0, n_trials - window_size + 1), step_size):
         end_idx = start_idx + window_size
         X_win = xarr.values[:, start_idx:end_idx].T
         if X_win.shape[0] == 0:
             continue
         dec_vals = clf.decision_function(scaler.transform(X_win))
-        rows.append({
+        results.append({
             'mouse_id': mouse,
-            'trial_start': start_idx,
+            'reward_group': w['reward_group'],
             'trial_center': start_idx + window_size // 2,
             'mean_decision_value': np.mean(dec_vals) * sign_flip,
-            'reward_group': w['reward_group'],
         })
-    return pd.DataFrame(rows)
 
-
-results_all = pd.concat(
-    [apply_decoder(weights, xarrays_learning[m], m, window_size, step_size)
-     for m in weights],
-    ignore_index=True,
-)
+results_df = pd.concat([pd.DataFrame(results)], ignore_index=True)
+mice_rew = [m for m, w in weights.items() if w['reward_group'] == 'R+']
+mice_nonrew = [m for m, w in weights.items() if w['reward_group'] == 'R-']
 
 
 # ============================================================================
-# Plotting helpers
+# Figure
 # ============================================================================
 
-def plot_behavior(ax, data, color, title):
-    if data is None or data.empty:
-        ax.set_title(title + ' (no data)')
-        ax.set_xlim(0, cut_n_trials)
-        ax.set_ylim(0, 1)
-        return
+fig, axes = plt.subplots(2, 2, figsize=(10, 6))
+
+data_rew = bh_df.loc[bh_df['mouse_id'].isin(mice_rew)]
+data_nonrew = bh_df.loc[bh_df['mouse_id'].isin(mice_nonrew)]
+results_rew = results_df[results_df['reward_group'] == 'R+']
+results_nonrew = results_df[results_df['reward_group'] == 'R-']
+
+# Row 1: behaviour
+for ax, data, color, title in [
+    (axes[0, 0], data_rew,    reward_palette[1], 'R+ mice'),
+    (axes[0, 1], data_nonrew, reward_palette[0], 'R- mice'),
+]:
     sns.lineplot(data=data, x='trial_w', y='learning_curve_w',
-                 color=color, errorbar=None, ax=ax)
+                 color=color, errorbar='ci', ax=ax)
     ax.set_xlabel('Trial within Day 0')
     ax.set_ylabel('Learning curve (w)')
     ax.set_title(title)
     ax.set_ylim(0, 1)
     ax.set_xlim(0, cut_n_trials)
 
-
-def plot_decision(ax, data, color, title, ylim=(-5, 3)):
-    if data is None or data.empty:
-        ax.set_title(title + ' (no data)')
-        ax.set_xlim(0, cut_n_trials)
-        return
+# Row 2: decision values
+for ax, data, color, title in [
+    (axes[1, 0], results_rew,    reward_palette[1], 'R+ decoder value'),
+    (axes[1, 1], results_nonrew, reward_palette[0], 'R- decoder value'),
+]:
     sns.lineplot(data=data, x='trial_center', y='mean_decision_value',
-                 color=color, errorbar=None, ax=ax)
+                 estimator=np.mean, errorbar='ci', color=color, ax=ax)
     ax.axhline(y=0, color='black', linestyle='--', alpha=0.5)
     ax.set_xlabel('Trial within Day 0')
-    ax.set_ylabel('Decision value')
+    ax.set_ylabel('Mean decision value')
     ax.set_title(title)
-    if ylim is not None:
-        ax.set_ylim(ylim)
     ax.set_xlim(0, cut_n_trials)
+
+plt.tight_layout()
+sns.despine()
 
 
 # ============================================================================
-# Figure — one page per mouse
+# Save
 # ============================================================================
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-out_path = os.path.join(OUTPUT_DIR, 'figure_4c.pdf')
-
-with PdfPages(out_path) as pdf:
-    for mouse in results_all['mouse_id'].unique():
-        mouse_data = results_all[results_all['mouse_id'] == mouse]
-        mouse_bh = bh_df[bh_df['mouse_id'] == mouse]
-        reward_group = mouse_data['reward_group'].iloc[0]
-        color = reward_palette[1] if reward_group == 'R+' else reward_palette[0]
-
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
-
-        plot_behavior(ax1, mouse_bh, color, f'{mouse} ({reward_group}) — Behaviour')
-        plot_decision(ax2, mouse_data, color, f'{mouse} ({reward_group}) — Decoder value')
-
-        plt.tight_layout()
-        sns.despine()
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close(fig)
-
+out_path = os.path.join(OUTPUT_DIR, 'figure_4c.svg')
+fig.savefig(out_path, format='svg', dpi=300, bbox_inches='tight')
 print(f"\nSaved: {out_path}")
+
+plt.show()
