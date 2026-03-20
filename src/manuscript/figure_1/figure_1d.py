@@ -1,5 +1,5 @@
 """
-Figure 1e: Example behavioral performance across learning days
+Figure 1d: Example behavioral performance across learning days
 
 This script generates Panel e for Figure 1, showing behavioral performance
 across 5 days (days -2, -1, 0, +1, +2) for two example mice (GF305 and AR180).

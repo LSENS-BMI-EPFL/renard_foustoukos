@@ -1,9 +1,9 @@
 """
-Figure 1f-g: Average behavioral performance across imaging mice
+Figure 1e-f: Average behavioral performance across imaging mice
 
-This script generates Panels f and g for Figure 1:
-- Panel f: Performance across 5 days for all imaging mice (line plot)
-- Panel g: Performance comparison for days 0, +1, +2 (bar plot with statistics)
+This script generates Panels e and f for Figure 1:
+- Panel e: Performance across 5 days for all imaging mice (line plot)
+- Panel f: Performance comparison for days 0, +1, +2 (bar plot with statistics)
 """
 
 import os

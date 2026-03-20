@@ -1,5 +1,5 @@
 """
-Supplementary Figure 4d: Proportion of cells participating in reactivation
+Supplementary Figure 4c: Proportion of cells participating in reactivation
 across days for LMI+ vs LMI- cells (binary participation).
 
 Binary participation is determined by circular-shift control: a cell x day is

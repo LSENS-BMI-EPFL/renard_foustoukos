@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from scipy.stats import pearsonr
 from sklearn.linear_model import LinearRegression
 from sklearn.utils import resample
 
@@ -53,7 +54,9 @@ w_flat   = merged['classifier_weight'].values
 X = lmi_flat.reshape(-1, 1)
 reg = LinearRegression().fit(X, w_flat)
 r2  = reg.score(X, w_flat)
-print(f"R² = {r2:.3f}  |  slope = {reg.coef_[0]:.4f}  |  intercept = {reg.intercept_:.4f}")
+r_pearson, p_pearson = pearsonr(lmi_flat, w_flat)
+print(f"R² = {r2:.3f}  |  r = {r_pearson:.3f}  |  p = {p_pearson:.2e}"
+      f"  |  slope = {reg.coef_[0]:.4f}  |  intercept = {reg.intercept_:.4f}")
 
 x_vals = np.linspace(lmi_flat.min(), lmi_flat.max(), 200)
 y_pred = reg.predict(x_vals.reshape(-1, 1))
@@ -89,6 +92,10 @@ for mouse in merged['mouse_id'].unique():
 ax.plot(x_vals, y_pred, color='#2d2d2d', linewidth=2)
 ax.fill_between(x_vals, ci_low, ci_high, color='black', alpha=0.2, label='95% CI')
 
+p_str = f'p = {p_pearson:.2e}' if p_pearson >= 1e-4 else f'p < 0.0001'
+ax.text(0.05, 0.95, f'r = {r_pearson:.3f}\n{p_str}',
+        transform=ax.transAxes, va='top', ha='left', fontsize=9)
+
 ax.set_xlabel('Learning Modulation Index (LMI)')
 ax.set_ylabel('Classifier weight')
 ax.set_ylim(-2.5, 2)
@@ -110,6 +117,8 @@ merged[['mouse_id', 'roi', 'reward_group', 'lmi', 'classifier_weight']].to_csv(
 print("Saved: supp_2c_data.csv")
 
 pd.DataFrame([{
+    'r': r_pearson,
+    'p_value': p_pearson,
     'r2': r2,
     'r2_ci_low': r2_ci[0],
     'r2_ci_high': r2_ci[1],

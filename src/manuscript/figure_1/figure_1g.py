@@ -1,7 +1,7 @@
 """
-Figure 1h: Day 0 performance across whisker trials
+Figure 1g: Day 0 performance across whisker trials
 
-This script generates Panel h for Figure 1, showing performance during
+This script generates Panel g for Figure 1, showing performance during
 the first learning session (day 0) aligned to whisker trial number.
 Includes raw trial outcomes and fitted learning curves with statistical testing.
 """
