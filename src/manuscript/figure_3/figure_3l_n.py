@@ -1,10 +1,10 @@
 """
-Figure 3m-o: Decoding analyses
+Figure 3l-n: Decoding analyses
 
-This script generates Panels m-o for Figure 3:
-- Panel m: Pre vs post learning decoding accuracy per reward group
-- Panel n: Pairwise day decoding with fixed pre/post decoder (accuracy matrix)
-- Panel o: Does day 0 activity resemble pre or post learning? (pre vs day0 / day0 vs post)
+This script generates Panels l-n for Figure 3:
+- Panel l: Pre vs post learning decoding accuracy per reward group
+- Panel m: Pairwise day decoding with fixed pre/post decoder (accuracy matrix)
+- Panel n: Does day 0 activity resemble pre or post learning? (pre vs day0 / day0 vs post)
 
 For each panel, two CSV files are saved alongside this script:
 - figure_3X_data.csv: data points displayed in the panel
@@ -284,10 +284,10 @@ def train_and_save_decoder_weights(
 
 
 # ============================================================================
-# Panel m: Pre vs post learning decoding accuracy
+# Panel l: Pre vs post learning decoding accuracy
 # ============================================================================
 
-def panel_m_decoding_accuracy(
+def panel_l_decoding_accuracy(
     vectors_rew=None,
     vectors_nonrew=None,
     mice_rew=None,
@@ -301,15 +301,15 @@ def panel_m_decoding_accuracy(
     dpi=300,
 ):
     """
-    Generate Figure 3 Panel m: Pre vs post learning decoding accuracy.
+    Generate Figure 3 Panel l: Pre vs post learning decoding accuracy.
 
     Trains a logistic regression classifier per mouse to distinguish pre-learning
     (days -2, -1) from post-learning (days +1, +2) population activity patterns.
     Compares cross-validated accuracy between R+ and R- groups.
 
     Saves:
-        figure_3m_data.csv: per-mouse accuracy and chance accuracy
-        figure_3m_stats.csv: Mann-Whitney U (R+ vs R-) and Wilcoxon (accuracy vs chance)
+        figure_3l_data.csv: per-mouse accuracy and chance accuracy
+        figure_3l_stats.csv: Mann-Whitney U (R+ vs R-) and Wilcoxon (accuracy vs chance)
     """
     if vectors_rew is None or vectors_nonrew is None:
         vectors_rew, vectors_nonrew, mice_rew, mice_nonrew = load_and_process_data(
@@ -364,9 +364,9 @@ def panel_m_decoding_accuracy(
 
     # Save figure
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, f'figure_3m.{save_format}'), format=save_format, dpi=dpi, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, f'figure_3l.{save_format}'), format=save_format, dpi=dpi, bbox_inches='tight')
     plt.close()
-    print(f"Figure 3m saved to: {os.path.join(output_dir, 'figure_3m.' + save_format)}")
+    print(f"Figure 3l saved to: {os.path.join(output_dir, 'figure_3l.' + save_format)}")
 
     # Save CSVs
     data_df = pd.DataFrame({
@@ -375,13 +375,13 @@ def panel_m_decoding_accuracy(
         'accuracy': np.concatenate([accs_rew, accs_nonrew]),
         'chance_accuracy': np.concatenate([chance_rew, chance_nonrew]),
     })
-    data_df.to_csv(os.path.join(OUTPUT_DIR, 'figure_3m_data.csv'), index=False)
-    pd.DataFrame(stats_rows).to_csv(os.path.join(OUTPUT_DIR, 'figure_3m_stats.csv'), index=False)
-    print(f"Figure 3m data/stats saved to: {OUTPUT_DIR}")
+    data_df.to_csv(os.path.join(OUTPUT_DIR, 'figure_3l_data.csv'), index=False)
+    pd.DataFrame(stats_rows).to_csv(os.path.join(OUTPUT_DIR, 'figure_3l_stats.csv'), index=False)
+    print(f"Figure 3l data/stats saved to: {OUTPUT_DIR}")
 
 
 # ============================================================================
-# Panel n: Pairwise day decoding with fixed pre/post decoder
+# Panel m: Pairwise day decoding with fixed pre/post decoder
 # ============================================================================
 
 def _make_symmetric_with_diag(mat):
@@ -479,7 +479,7 @@ def _extract_pairwise_decoding_accuracy(acc_matrices):
     return acc_pre_vs_day0, acc_day0_vs_post
 
 
-def panel_n_pairwise_decoding(
+def panel_m_pairwise_decoding(
     vectors_rew=None,
     vectors_nonrew=None,
     mice_rew=None,
@@ -494,15 +494,15 @@ def panel_n_pairwise_decoding(
     dpi=300,
 ):
     """
-    Generate Figure 3 Panel n: Pairwise day decoding with fixed pre/post decoder.
+    Generate Figure 3 Panel l: Pairwise day decoding with fixed pre/post decoder.
 
     Trains a classifier to distinguish pre (-2, -1) from post (+1, +2) activity,
     then applies it to decode all pairs of days (including day 0) to show when
     activity transitions from pre-like to post-like.
 
     Saves:
-        figure_3n_data.csv: per-mouse accuracy for each (day_i, day_j) pair
-        figure_3n_stats.csv: Mann-Whitney U (R+ vs R-) for each day pair
+        figure_3l_data.csv: per-mouse accuracy for each (day_i, day_j) pair
+        figure_3l_stats.csv: Mann-Whitney U (R+ vs R-) for each day pair
     """
     if vectors_rew is None or vectors_nonrew is None:
         vectors_rew, vectors_nonrew, mice_rew, mice_nonrew = load_and_process_data(
@@ -585,9 +585,9 @@ def panel_n_pairwise_decoding(
 
     # Save figure
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, f'figure_3n.{save_format}'), format=save_format, dpi=dpi, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, f'figure_3m.{save_format}'), format=save_format, dpi=dpi, bbox_inches='tight')
     plt.close()
-    print(f"Figure 3n saved to: {os.path.join(output_dir, 'figure_3n.' + save_format)}")
+    print(f"Figure 3m saved to: {os.path.join(output_dir, 'figure_3m.' + save_format)}")
 
     # Save CSVs
     records = []
@@ -602,16 +602,16 @@ def panel_n_pairwise_decoding(
                         'day_j': day_j,
                         'accuracy': matrices[m_idx, i, j],
                     })
-    pd.DataFrame(records).to_csv(os.path.join(OUTPUT_DIR, 'figure_3n_data.csv'), index=False)
-    pd.DataFrame(stats_rows).to_csv(os.path.join(OUTPUT_DIR, 'figure_3n_stats.csv'), index=False)
-    print(f"Figure 3n data/stats saved to: {OUTPUT_DIR}")
+    pd.DataFrame(records).to_csv(os.path.join(OUTPUT_DIR, 'figure_3m_data.csv'), index=False)
+    pd.DataFrame(stats_rows).to_csv(os.path.join(OUTPUT_DIR, 'figure_3m_stats.csv'), index=False)
+    print(f"Figure 3m data/stats saved to: {OUTPUT_DIR}")
 
 
 # ============================================================================
-# Panel o: Does day 0 look more like pre or post?
+# Panel n: Does day 0 look more like pre or post?
 # ============================================================================
 
-def panel_o_day0_classification(
+def panel_n_day0_classification(
     vectors_rew=None,
     vectors_nonrew=None,
     mice_rew=None,
@@ -626,7 +626,7 @@ def panel_o_day0_classification(
     dpi=300,
 ):
     """
-    Generate Figure 3 Panel o: Does day 0 activity resemble pre or post learning?
+    Generate Figure 3 Panel n: Does day 0 activity resemble pre or post learning?
 
     Extracts from the fixed-decoder pairwise matrix:
     - Pre vs Day 0: average decoding accuracy between pre days (-2, -1) and day 0
@@ -634,8 +634,8 @@ def panel_o_day0_classification(
     Plots both comparisons per reward group.
 
     Saves:
-        figure_3o_data.csv: per-mouse pre_vs_day0 and day0_vs_post accuracies
-        figure_3o_stats.csv: Wilcoxon (each condition vs chance and paired) +
+        figure_3n_data.csv: per-mouse pre_vs_day0 and day0_vs_post accuracies
+        figure_3n_stats.csv: Wilcoxon (each condition vs chance and paired) +
                              Mann-Whitney U (R+ vs R- per comparison)
     """
     if vectors_rew is None or vectors_nonrew is None:
@@ -713,9 +713,9 @@ def panel_o_day0_classification(
 
     # Save figure
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, f'figure_3o.{save_format}'), format=save_format, dpi=dpi, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, f'figure_3n.{save_format}'), format=save_format, dpi=dpi, bbox_inches='tight')
     plt.close()
-    print(f"Figure 3o saved to: {os.path.join(output_dir, 'figure_3o.' + save_format)}")
+    print(f"Figure 3n saved to: {os.path.join(output_dir, 'figure_3n.' + save_format)}")
 
     # Save CSVs
     data_df = pd.DataFrame({
@@ -730,9 +730,9 @@ def panel_o_day0_classification(
             acc_day0_vs_post_rew, acc_day0_vs_post_nonrew,
         ]),
     })
-    data_df.to_csv(os.path.join(OUTPUT_DIR, 'figure_3o_data.csv'), index=False)
-    pd.DataFrame(stats_rows).to_csv(os.path.join(OUTPUT_DIR, 'figure_3o_stats.csv'), index=False)
-    print(f"Figure 3o data/stats saved to: {OUTPUT_DIR}")
+    data_df.to_csv(os.path.join(OUTPUT_DIR, 'figure_3n_data.csv'), index=False)
+    pd.DataFrame(stats_rows).to_csv(os.path.join(OUTPUT_DIR, 'figure_3n_stats.csv'), index=False)
+    print(f"Figure 3n data/stats saved to: {OUTPUT_DIR}")
 
 
 # ============================================================================
@@ -762,23 +762,23 @@ if __name__ == '__main__':
     print("\nTraining and saving decoder weights (used by figure_4b/c)...")
     train_and_save_decoder_weights(vectors_rew, vectors_nonrew, mice_rew, mice_nonrew)
 
-    print("\nGenerating panel m (decoding accuracy)...")
-    panel_m_decoding_accuracy(**shared, n_shuffles=N_SHUFFLES)
+    print("\nGenerating panel l (decoding accuracy)...")
+    panel_l_decoding_accuracy(**shared, n_shuffles=N_SHUFFLES)
 
     # Compute pairwise matrices once — shared by panels n and o
     print("\nComputing pairwise day decoding matrices (shared by panels n and o)...")
     accs_rew_matrix = _pairwise_day_decoding_fixed_decoder_cv(vectors_rew, DAYS)
     accs_nonrew_matrix = _pairwise_day_decoding_fixed_decoder_cv(vectors_nonrew, DAYS)
 
-    print("\nGenerating panel n (pairwise day decoding matrix)...")
-    panel_n_pairwise_decoding(
+    print("\nGenerating panel m (pairwise day decoding matrix)...")
+    panel_m_pairwise_decoding(
         **shared,
         accs_rew_matrix=accs_rew_matrix,
         accs_nonrew_matrix=accs_nonrew_matrix,
     )
 
-    print("\nGenerating panel o (day 0 pre vs post classification)...")
-    panel_o_day0_classification(
+    print("\nGenerating panel n (day 0 pre vs post classification)...")
+    panel_n_day0_classification(
         **shared,
         accs_rew_matrix=accs_rew_matrix,
         accs_nonrew_matrix=accs_nonrew_matrix,

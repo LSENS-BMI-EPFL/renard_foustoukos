@@ -1,11 +1,11 @@
 """
-Figure 4k-l: Reactivation participation rate vs LMI.
-
-Panel k: Scatter plot of day-0 participation rate vs LMI (one dot per cell),
+Figure 4i_j: Reactivation participation rate vs LMI.
+    
+Panel i: Scatter plot of day-0 participation rate vs LMI (one dot per cell),
          separately for R+ and R- mice, with a linear regression line and
          Pearson r coefficient.
 
-Panel l: Participation rate across days (-2 to +2) for LMI+ vs LMI- cells,
+Panel j: Participation rate across days (-2 to +2) for LMI+ vs LMI- cells,
          showing per-mouse averages with individual trajectories. Stats:
          2-way repeated-measures ANOVA (day × LMI category) followed by
          Mann-Whitney U posthoc tests (positive vs negative per day).
@@ -314,17 +314,17 @@ def _prepare_data(merged_df):
 
 
 # ============================================================================
-# Panel k: scatter of day-0 participation rate vs LMI
+# Panel i: scatter of day-0 participation rate vs LMI
 # ============================================================================
 
-def panel_k_participation_vs_lmi(
+def panel_i_participation_vs_lmi(
     merged_df,
     output_dir=OUTPUT_DIR,
-    filename='figure_4k',
+    filename='figure_4i',
     save_format='svg',
     dpi=300,
 ):
-    """Figure 4 Panel k: scatter of day-0 participation rate vs LMI.
+    """Figure 4 Panel i: scatter of day-0 participation rate vs LMI.
 
     One dot per cell. Separate subplots for R+ and R-.
     Linear regression line with Pearson r and p-value displayed.
@@ -401,18 +401,18 @@ def panel_k_participation_vs_lmi(
 
 
 # ============================================================================
-# Panel l: participation rate across days (LMI+ vs LMI-)
+# Panel j: participation rate across days (LMI+ vs LMI-)
 # ============================================================================
 
-def panel_l_participation_across_days(
+def panel_j_participation_across_days(
     merged_df,
     per_day_df,
     output_dir=OUTPUT_DIR,
-    filename='figure_4l',
+    filename='figure_4j',
     save_format='svg',
     dpi=300,
 ):
-    """Figure 4 Panel l: participation rate across days for LMI+ vs LMI- cells.
+    """Figure 4 Panel j: participation rate across days for LMI+ vs LMI- cells.
 
     Per-mouse averages with individual trajectories. Stats: Kruskal-Wallis
     test (effect of day) run independently for each of the four groups
@@ -575,5 +575,5 @@ if __name__ == '__main__':
     print(f"\nDataset: {len(merged_df)} cells, {len(per_day_df)} cell-day records, "
           f"{merged_df['mouse_id'].nunique()} mice")
 
-    panel_k_participation_vs_lmi(merged_df, filename='figure_4k')
-    panel_l_participation_across_days(merged_df, per_day_df, filename='figure_4l')
+    panel_i_participation_vs_lmi(merged_df, filename='figure_4i')
+    panel_j_participation_across_days(merged_df, per_day_df, filename='figure_4j')

@@ -1,13 +1,9 @@
 """
 Supplementary Figure 3m: Pairwise correlations between projection neurons
 (wS2-wS2 and wM1-wM1 pairs) during a 2 s pre-stimulus quiet window,
-compared pre vs post learning.
+compared pre vs post learning. Mapping trials only.
 
-Two figures are produced:
-  - supp_3m_pairlevel.svg  : bar plot at the cell-pair level
-  - supp_3m_mouselevel.svg : bar plot at the mouse-average level (main panel)
-
-Computation is parallelised across mice.
+Stats at the cell-pair level (Mann-Whitney U, pre vs post).
 
 ANALYSIS_MODE:
   'compute' — run the full computation and save intermediate CSVs
@@ -23,7 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from scipy.stats import mannwhitneyu, pearsonr, wilcoxon
+from scipy.stats import mannwhitneyu, pearsonr
 
 sys.path.append(r'/home/aprenard/repos/NWB_analysis')
 sys.path.append(r'/home/aprenard/repos/fast-learning')
@@ -37,7 +33,6 @@ import src.utils.utils_io as io
 # ============================================================================
 
 ANALYSIS_MODE = 'analyze'   # 'compute' or 'analyze'
-DATA_TYPE     = 'mapping'   # 'mapping' or 'learning'
 WIN_SEC       = (-2, 0)     # quiet window before stimulus onset
 PRE_DAYS      = [-2, -1]
 POST_DAYS     = [1, 2]
@@ -73,7 +68,7 @@ def process_mouse(mouse_id):
     reward_group = io.get_mouse_reward_group_from_db(io.db_path, mouse_id)
     folder = os.path.join(io.processed_dir, 'mice')
     xarr = utils_imaging.load_mouse_xarray(
-        mouse_id, folder, f'tensor_xarray_{DATA_TYPE}_data.nc', substracted=False)
+        mouse_id, folder, 'tensor_xarray_mapping_data.nc', substracted=False)
     xarr.name = 'dff'
     xarr = xarr.sel(trial=xarr['day'].isin(PRE_DAYS + POST_DAYS))
     xarr = xarr.sel(time=slice(WIN_SEC[0], WIN_SEC[1]))
@@ -104,14 +99,14 @@ def process_mouse(mouse_id):
 
             if trial_corrs:
                 mouse_results.append({
-                    'mouse_id':    mouse_id,
+                    'mouse_id':     mouse_id,
                     'reward_group': reward_group,
-                    'period':      period,
-                    'pair_type':   f'{cell_types[i]}-{cell_types[i]}',
-                    'roi_i':       rois[i],
-                    'roi_j':       rois[j],
-                    'correlation': np.mean(trial_corrs),
-                    'n_trials':    len(trial_corrs),
+                    'period':       period,
+                    'pair_type':    f'{cell_types[i]}-{cell_types[i]}',
+                    'roi_i':        rois[i],
+                    'roi_j':        rois[j],
+                    'correlation':  np.mean(trial_corrs),
+                    'n_trials':     len(trial_corrs),
                 })
 
     print(f"  {mouse_id}: {len(mouse_results)} pairs")
@@ -154,7 +149,7 @@ if __name__ == '__main__':
             continue
 
         group_mice = mice_by_group[reward_group]
-        inter_dir  = os.path.join(RESULTS_DIR, reward_group, DATA_TYPE)
+        inter_dir  = os.path.join(RESULTS_DIR, reward_group, 'mapping')
         os.makedirs(inter_dir, exist_ok=True)
         corr_csv   = os.path.join(inter_dir, 'pairwise_correlations_prepost.csv')
 
@@ -182,55 +177,24 @@ if __name__ == '__main__':
             if len(pre) > 0 and len(post) > 0:
                 stat, p = mannwhitneyu(pre, post, alternative='two-sided')
                 stats_pair.append({
-                    'pair_type': pt, 'test': 'Mann-Whitney U',
-                    'mean_pre': np.mean(pre), 'sem_pre': np.std(pre) / np.sqrt(len(pre)),
-                    'mean_post': np.mean(post), 'sem_post': np.std(post) / np.sqrt(len(post)),
-                    'n_pre': len(pre), 'n_post': len(post),
-                    'statistic': stat, 'p_value': p,
+                    'pair_type':  pt, 'test': 'Mann-Whitney U',
+                    'mean_pre':   np.mean(pre),  'sem_pre':  np.std(pre)  / np.sqrt(len(pre)),
+                    'mean_post':  np.mean(post), 'sem_post': np.std(post) / np.sqrt(len(post)),
+                    'n_pre':      len(pre), 'n_post': len(post),
+                    'statistic':  stat, 'p_value': p,
                 })
         stats_pair_df = pd.DataFrame(stats_pair)
 
-        # ── Mouse-level averages + stats ─────────────────────────────────────
-        mouse_avg = (corr_df
-                     .groupby(['mouse_id', 'reward_group', 'period', 'pair_type'])
-                     ['correlation'].mean().reset_index()
-                     .rename(columns={'correlation': 'mean_correlation'}))
-        mouse_avg.to_csv(
-            os.path.join(inter_dir, 'pairwise_correlations_mouse_averages_prepost.csv'),
-            index=False)
-
-        stats_mouse = []
-        for pt in PAIR_TYPES:
-            pivot = (mouse_avg[mouse_avg['pair_type'] == pt]
-                     .pivot(index='mouse_id', columns='period', values='mean_correlation')
-                     .dropna())
-            if len(pivot) > 0:
-                stat, p = wilcoxon(pivot['pre'].values, pivot['post'].values,
-                                   alternative='two-sided')
-                stats_mouse.append({
-                    'pair_type': pt, 'test': 'Wilcoxon signed-rank',
-                    'mean_pre': pivot['pre'].mean(), 'sem_pre': pivot['pre'].sem(),
-                    'mean_post': pivot['post'].mean(), 'sem_post': pivot['post'].sem(),
-                    'n_mice': len(pivot), 'statistic': stat, 'p_value': p,
-                })
-        stats_mouse_df = pd.DataFrame(stats_mouse)
-
-        # Save stats
         stats_pair_df.to_csv(
-            os.path.join(OUTPUT_DIR, f'supp_3m_{reward_group}_stats_pairlevel.csv'),
-            index=False)
-        stats_mouse_df.to_csv(
-            os.path.join(OUTPUT_DIR, f'supp_3m_{reward_group}_stats_mouselevel.csv'),
-            index=False)
-        mouse_avg.to_csv(
-            os.path.join(OUTPUT_DIR, f'supp_3m_{reward_group}_data_mouselevel.csv'),
-            index=False)
+            os.path.join(OUTPUT_DIR, f'supp_3m_{reward_group}_stats.csv'), index=False)
+        corr_df.to_csv(
+            os.path.join(OUTPUT_DIR, f'supp_3m_{reward_group}_data.csv'), index=False)
 
         # ── Pair-level figure ─────────────────────────────────────────────────
         fig, axes = plt.subplots(1, 2, figsize=(10, 5), sharey=True)
         for idx, pt in enumerate(PAIR_TYPES):
-            ax      = axes[idx]
-            sub     = corr_df[corr_df['pair_type'] == pt]
+            ax  = axes[idx]
+            sub = corr_df[corr_df['pair_type'] == pt]
             sns.barplot(data=sub, x='period', y='correlation',
                         order=['pre', 'post'], ax=ax, errorbar='se', capsize=0.1)
             ax.axhline(0, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
@@ -255,42 +219,9 @@ if __name__ == '__main__':
         plt.suptitle(f'Pre vs Post — Pair Level ({reward_group})', fontsize=14, y=1.02)
         plt.tight_layout()
         sns.despine()
-        fig.savefig(os.path.join(OUTPUT_DIR, f'supp_3m_{reward_group}_pairlevel.svg'),
+        fig.savefig(os.path.join(OUTPUT_DIR, f'supp_3m_{reward_group}.svg'),
                     format='svg', dpi=300, bbox_inches='tight')
-        print(f"Saved: supp_3m_{reward_group}_pairlevel.svg")
-        plt.close()
-
-        # ── Mouse-level figure ────────────────────────────────────────────────
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5), sharey=True)
-        for idx, pt in enumerate(PAIR_TYPES):
-            ax  = axes[idx]
-            sub = mouse_avg[mouse_avg['pair_type'] == pt]
-            sns.barplot(data=sub, x='period', y='mean_correlation',
-                        order=['pre', 'post'], ax=ax, errorbar='se', capsize=0.1)
-            ax.axhline(0, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
-            ax.set_title(pt, fontsize=14, fontweight='bold')
-            ax.set_xlabel('Period', fontsize=12)
-            ax.set_ylabel('Mean Pearson correlation' if idx == 0 else '', fontsize=12)
-
-            row = stats_mouse_df[stats_mouse_df['pair_type'] == pt]
-            if not row.empty:
-                p_val = row.iloc[0]['p_value']
-                if p_val < 0.05:
-                    pre_top  = sub[sub['period'] == 'pre']['mean_correlation'].agg(['mean', 'sem']).sum()
-                    post_top = sub[sub['period'] == 'post']['mean_correlation'].agg(['mean', 'sem']).sum()
-                    add_significance_stars(ax, 0, 1, max(pre_top, post_top) +
-                                           (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.06, p_val)
-                else:
-                    ax.text(0.95, 0.95, f'p={p_val:.3f}', transform=ax.transAxes,
-                            fontsize=10, va='top', ha='right',
-                            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-
-        plt.suptitle(f'Pre vs Post — Mouse Level ({reward_group})', fontsize=14, y=1.02)
-        plt.tight_layout()
-        sns.despine()
-        fig.savefig(os.path.join(OUTPUT_DIR, f'supp_3m_{reward_group}_mouselevel.svg'),
-                    format='svg', dpi=300, bbox_inches='tight')
-        print(f"Saved: supp_3m_{reward_group}_mouselevel.svg")
+        print(f"Saved: supp_3m_{reward_group}.svg")
         plt.close()
 
     print("\nDone.")

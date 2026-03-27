@@ -94,6 +94,7 @@ psth     = pd.concat(psth_list,     ignore_index=True)
 # Convert to % dF/F0 and tag learning period
 avg_resp['average_response'] *= 100
 psth['psth']                 *= 100
+psth['time']                  = psth['time'].round(4)
 avg_resp['learning_period'] = avg_resp['day'].map(lambda x: 'pre' if x in [-2, -1] else 'post')
 psth['learning_period']     = psth['day'].map(lambda x: 'pre' if x in [-2, -1] else 'post')
 

@@ -76,6 +76,7 @@ data_ctype = (data_ctype
               .mean()
               .reset_index())
 data_ctype['psth'] = data_ctype['psth'] * 100
+data_ctype['time'] = data_ctype['time'].round(4)
 
 
 # ============================================================================

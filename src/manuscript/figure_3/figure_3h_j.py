@@ -1,11 +1,10 @@
 """
-Figure 3h-k: Trial-by-trial correlation matrices and network reorganization metrics
+Figure 3h-j: Trial-by-trial correlation matrices and network reorganization metrics
 
-This script generates Panels h-k for Figure 3:
+This script generates Panels h-j for Figure 3:
 - Panel h: Average trial-by-trial correlation matrices for R+ and R- groups
 - Panel i: Within-day correlation trajectory across days
 - Panel j: Network reorganization index
-- Panel k: Day 0 similarity trajectory across days
 
 For each panel, two CSV files are saved alongside this script:
 - figure_3X_data.csv: data points displayed in the panel
@@ -543,126 +542,6 @@ def panel_j_reorganization_index(
 
 
 # ============================================================================
-# Panel k: Day 0 similarity trajectory
-# ============================================================================
-
-def panel_k_day0_trajectory(
-    corr_matrices_rew=None,
-    corr_matrices_nonrew=None,
-    mice_rew=None,
-    mice_nonrew=None,
-    similarity_metric='spearman',
-    select_lmi=False,
-    zscore=False,
-    projection_type=None,
-    output_dir=OUTPUT_DIR,
-    save_format='svg',
-    dpi=300,
-):
-    """
-    Generate Figure 3 Panel k: Day 0 network similarity trajectory.
-
-    Shows how the correlation with day 0 activity changes across learning days,
-    separately for R+ and R- groups. Annotated with per-day between-group statistics.
-
-    Saves:
-        figure_3k_data.csv: per-mouse correlation of each day with day 0
-        figure_3k_stats.csv: 2-way ANOVA (day x reward_group) + Mann-Whitney U post-hoc per day
-    """
-    if corr_matrices_rew is None or corr_matrices_nonrew is None:
-        corr_matrices_rew, corr_matrices_nonrew, mice_rew, mice_nonrew = load_and_process_data(
-            similarity_metric=similarity_metric,
-            select_lmi=select_lmi,
-            zscore=zscore,
-            projection_type=projection_type,
-        )
-
-    sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1)
-
-    metrics_rew = _compute_day0_metrics(corr_matrices_rew, mice_rew, 'R+')
-    metrics_nonrew = _compute_day0_metrics(corr_matrices_nonrew, mice_nonrew, 'R-')
-    metrics_combined = pd.concat([metrics_rew, metrics_nonrew], ignore_index=True)
-
-    # Reshape to long format for ANOVA
-    day_cols = [f'corr_day0_vs_day{d:+d}' for d in DAYS]
-    long_df = metrics_combined.melt(
-        id_vars=['mouse_id', 'reward_group'],
-        value_vars=day_cols,
-        var_name='day_label', value_name='correlation',
-    )
-    long_df['day'] = long_df['day_label'].str.extract(r'vs_day([+-]?\d+)$').astype(int)
-    long_df['day_label'] = pd.Categorical(long_df['day_label'], categories=day_cols, ordered=True)
-
-    # Statistics: 2-way ANOVA (day x reward_group)
-    model = ols('correlation ~ C(reward_group) * C(day)', data=long_df).fit()
-    anova_table = anova_lm(model, typ=2)
-    anova_rows = []
-    for term, row in anova_table.iterrows():
-        anova_rows.append({
-            'test': '2-way ANOVA',
-            'term': term,
-            'F': row.get('F', np.nan),
-            'p_value': row['PR(>F)'],
-            'significance': _significance_stars(row['PR(>F)']) if not np.isnan(row['PR(>F)']) else '',
-        })
-
-    # Post-hoc: Mann-Whitney U between groups for each day (no correction)
-    stats_rows = anova_rows
-    stats_dict = {}
-    for day in DAYS:
-        col = f'corr_day0_vs_day{day:+d}'
-        r_plus = metrics_rew[col].dropna()
-        r_minus = metrics_nonrew[col].dropna()
-        stat, p = mannwhitneyu(r_plus, r_minus, alternative='two-sided')
-        stats_dict[day] = p
-        stats_rows.append({
-            'test': 'Mann-Whitney U (post-hoc)',
-            'term': f'R+ vs R- day {day:+d}',
-            'F': np.nan,
-            'p_value': p,
-            'significance': _significance_stars(p),
-        })
-
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-
-    sns.pointplot(
-        data=long_df, x='day_label', y='correlation', hue='reward_group',
-        palette=reward_palette[::-1], ax=ax, errorbar='ci',
-        markers='o', linestyles='-', markersize=8, linewidth=2,
-    )
-
-    for mouse_id in metrics_combined['mouse_id'].unique():
-        mouse_data = long_df[long_df['mouse_id'] == mouse_id].sort_values('day')
-        rg = mouse_data['reward_group'].iloc[0]
-        color = reward_palette[1] if rg == 'R+' else reward_palette[0]
-        ax.plot(range(len(DAYS)), mouse_data['correlation'].values, color=color, alpha=0.3, linewidth=0.8, zorder=1)
-
-    ylim_top = 0.6 if similarity_metric == 'pearson' else 0.3
-    for day in DAYS:
-        ax.text(DAYS.index(day), ylim_top * 0.95, _significance_stars(stats_dict[day]), ha='center', va='bottom', fontsize=9)
-
-    ax.set_ylim(0, ylim_top)
-    ax.set_xlabel('Day')
-    ax.set_ylabel('Correlation with Day 0')
-    ax.set_title('Day 0 Network Similarity Across Days')
-    ax.set_xticklabels(DAYS)
-    ax.legend(title='Group')
-    sns.despine()
-    plt.tight_layout()
-
-    # Save figure
-    os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, f'figure_3k.{save_format}'), format=save_format, dpi=dpi, bbox_inches='tight')
-    plt.close()
-    print(f"Figure 3k saved to: {os.path.join(output_dir, 'figure_3k.' + save_format)}")
-
-    # Save CSVs
-    metrics_combined.to_csv(os.path.join(OUTPUT_DIR, 'figure_3k_data.csv'), index=False)
-    pd.DataFrame(stats_rows).to_csv(os.path.join(OUTPUT_DIR, 'figure_3k_stats.csv'), index=False)
-    print(f"Figure 3k data/stats saved to: {OUTPUT_DIR}")
-
-
-# ============================================================================
 # Main execution
 # ============================================================================
 
@@ -699,8 +578,5 @@ if __name__ == '__main__':
 
     print("\nGenerating panel j (reorganization index)...")
     panel_j_reorganization_index(**shared)
-
-    print("\nGenerating panel k (day 0 trajectory)...")
-    panel_k_day0_trajectory(**shared)
 
     print("\nDone!")

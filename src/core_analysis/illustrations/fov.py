@@ -30,7 +30,7 @@ print(f"LMI entries for {MOUSE_ID}: {n_lmi}")
 
 # ---- Load cell image masks from NWB ----
 # Keys: module 'ophys' > ImageSegmentation 'all_cells' > PlaneSegmentation 'my_plane_segmentation'
-image_masks = get_image_mask(NWB_FILE)
+image_masks = get_image_mask(NWB_FILE, SEGMENTATION_INFO)
 n_cells_nwb = len(image_masks)
 print(f"Cells in NWB: {n_cells_nwb}")
 print(f"Match between NWB cells and LMI entries: {n_cells_nwb == n_lmi}")

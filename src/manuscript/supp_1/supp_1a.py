@@ -67,8 +67,8 @@ sns.set_theme(context='paper', style='ticks', font='sans-serif', font_scale=1,
 fig, ax = plt.subplots(figsize=(4, 6))
 sns.barplot(data=fh, x='reward_group', y='first_hit_trial',
             order=['R+', 'R-'], palette=reward_palette[::-1], width=0.3, ax=ax)
-sns.stripplot(data=fh, x='reward_group', y='first_hit_trial',
-              order=['R+', 'R-'], color='grey', jitter=False, dodge=True, alpha=0.4, ax=ax)
+sns.swarmplot(data=fh, x='reward_group', y='first_hit_trial',
+              order=['R+', 'R-'], color='grey', dodge=True, alpha=0.4, ax=ax)
 ax.set_ylabel('First hit trial')
 ax.set_xlabel('')
 sns.despine()

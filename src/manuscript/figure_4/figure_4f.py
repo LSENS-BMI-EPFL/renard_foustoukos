@@ -1,5 +1,5 @@
 """
-Figure 4h: Reactivation heatmap illustration (mouse AR127, single day)
+Figure 4f: Reactivation heatmap illustration (mouse AR127, single day)
 
 Layout:
   - Left strips: LMI, participation rate, and whisker template (one bar per cell)
@@ -41,10 +41,10 @@ OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_4', 'output')
 
 
 # ============================================================================
-# Panel h
+# Panel f
 # ============================================================================
 
-def panel_h_reactivation_heatmap(
+def panel_f_reactivation_heatmap(
     r_plus_results,
     r_minus_results,
     mouse=MOUSE,
@@ -54,7 +54,7 @@ def panel_h_reactivation_heatmap(
     sort_by='participation',
     top_n=20,
     results_dir=RESULTS_DIR,
-    filename='figure_4h',
+    filename='figure_4f',
     output_dir=OUTPUT_DIR,
     save_format='svg',
     dpi=300,
@@ -279,9 +279,9 @@ if __name__ == '__main__':
     r_minus_results = results_data['r_minus_results']
     print(f"Loaded results for {len(r_plus_results)} R+ mice and {len(r_minus_results)} R- mice")
 
-    panel_h_reactivation_heatmap(
+    panel_f_reactivation_heatmap(
         r_plus_results, r_minus_results,
         sort_by='participation',
         top_n=20,
-        filename='figure_4h',
+        filename='figure_4f',
     )

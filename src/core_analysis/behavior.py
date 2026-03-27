@@ -1227,11 +1227,12 @@ table['trial_w'] = table.groupby(['mouse_id', 'session_id', 'trial_type']).cumco
 table['trial_a'] = table.groupby(['mouse_id', 'session_id', 'trial_type']).cumcount()
 table['trial_c'] = table.groupby(['mouse_id', 'session_id', 'trial_type']).cumcount()
 
-
-
 table['reaction_time'] = table['lick_time'] - table['stim_onset']
-
 max_trials_rt = 100
+
+# Correcting spurious lick time entries on catch trials (30 data points from two mice)).
+# 1.3 because of artefact window.
+table.loc[table['reaction_time'] > 1.3, 'reaction_time'] = np.nan
 
 # Stim type definitions:
 #   (filter_col, outcome_col, trial_col, label, days_to_plot, rp_idx, rm_idx)
@@ -1350,6 +1351,10 @@ for ax, (stim_col, outcome_col, trial_col, stim_label, _, rpi, rmi) in zip(axes,
 sns.despine()
 plt.tight_layout()
 plt.savefig(os.path.join(output_dir, 'reaction_time_day0_per_stim_line.svg'), format='svg', dpi=300)
+
+
+
+
 
 
 # ############################################################
@@ -1778,3 +1783,51 @@ fig.savefig(
 #         sns.despine(ax=ax)
 
 #     fig.tight_layout()
+
+
+
+# ── Mice used in the study ────────────────────────────────────────────────────
+
+mice_imaging = io.select_mice_from_db(db_path, nwb_dir, experimenters=None,
+                                    exclude_cols=['exclude', 'two_p_exclude'],
+                                    optogenetic=['no', np.nan],
+                                    pharmacology=['no', np.nan],
+                                    two_p_imaging='yes',
+                                    )
+mice_imaging = sorted(mice_imaging)
+print(f"Two-photon imaging mice (n={len(mice_imaging)}):")
+print(mice_imaging)
+
+mice_muscimol = io.select_mice_from_db(db_path, nwb_dir, experimenters=None,
+                                    exclude_cols=['exclude'],
+                                    optogenetic=['no', np.nan],
+                                    pharmacology=['yes'],
+                                    pharma_inactivation_type=['learning'],
+                                        pharma_day = ["pre_-2", "pre_-1",
+            "muscimol_1", "muscimol_2", "muscimol_3",
+            "recovery_1", "recovery_2", "recovery_3"],
+                                    )
+mice_muscimol = sorted(mice_muscimol)
+print(f"\nMuscimol inactivation mice (n={len(mice_muscimol)}):")
+print(mice_muscimol)
+
+mice_opto = io.select_mice_from_db(db_path, nwb_dir, experimenters=None,
+                                    exclude_cols=['exclude', 'opto_exclude'],
+                                    optogenetic=['yes'],
+                                    pharmacology=['no', np.nan],
+                                    opto_inactivation_type=['learning'],
+                                    )
+mice_opto = sorted(mice_opto)
+print(f"\nOpto inactivation mice (n={len(mice_opto)}):")
+print(mice_opto)
+
+mice_particle_test = io.select_mice_from_db(db_path, nwb_dir, experimenters=None,
+                                    exclude_cols=['exclude', 'two_p_exclude'],
+                                    day=['whisker_on_1', 'whisker_off', 'whisker_on_2'],
+                                    optogenetic=['no', np.nan],
+                                    pharmacology=['no', np.nan],
+                                    two_p_imaging='yes',
+                                    )
+mice_particle_test = sorted(mice_particle_test)
+print(f"\nParticle test mice (n={len(mice_particle_test)}):")
+print(mice_particle_test)

@@ -56,7 +56,7 @@ OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'supp_4', 'output')
 # Execution mode
 #   'compute' : run circular-shift control, save CSV, then plot
 #   'plot'    : load previously saved CSV and plot only
-MODE = 'compute'
+MODE = 'plot'
 
 # Circular shift parameters
 SAMPLING_RATE = 30
@@ -274,10 +274,10 @@ def _load_binary_participation():
 # Panel: proportion of participating cells across days (LMI+ vs LMI-)
 # ============================================================================
 
-def panel_supp4d_proportion_across_days(
+def panel_supp4c_proportion_across_days(
     df,
     output_dir=OUTPUT_DIR,
-    filename='supp_4d',
+    filename='supp_4c',
     save_format='svg',
     dpi=300,
 ):
@@ -444,4 +444,4 @@ if __name__ == '__main__':
           f"{df['mouse_id'].nunique()} mice, "
           f"{df[['mouse_id', 'roi']].drop_duplicates().shape[0]} unique cells")
 
-    panel_supp4d_proportion_across_days(df, filename='supp_4d')
+    panel_supp4c_proportion_across_days(df, filename='supp_4c')

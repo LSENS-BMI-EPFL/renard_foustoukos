@@ -155,7 +155,7 @@ def panel_b_muscimol_timecourse(
         sns.lineplot(
             data=data.loc[data.mouse_id == imouse],
             x='pharma_day', y='outcome_w', estimator=np.mean,
-            color=stim_palette[1], alpha=0.6, legend=False,
+            color=reward_palette[1], alpha=0.6, legend=False,
             ax=ax, marker=None, err_style='bars', linewidth=1
         )
 
@@ -173,7 +173,7 @@ def panel_b_muscimol_timecourse(
     sns.pointplot(
         data=data.loc[data.mouse_id.isin(wS1_mice)],
         x='pharma_day', y='outcome_w', order=inactivation_labels,
-        color=stim_palette[1], ax=ax, linewidth=2
+        color=reward_palette[1], ax=ax, linewidth=2
     )
 
     ax.set_title('wS1')
@@ -200,7 +200,7 @@ def panel_b_muscimol_timecourse(
         sns.lineplot(
             data=data.loc[data.mouse_id == imouse],
             x='pharma_day', y='outcome_w', estimator=np.mean,
-            color=stim_palette[1], alpha=0.6, legend=False,
+            color=reward_palette[1], alpha=0.6, legend=False,
             ax=ax, marker=None, err_style='bars', linewidth=1
         )
 
@@ -218,7 +218,7 @@ def panel_b_muscimol_timecourse(
     sns.pointplot(
         data=data.loc[data.mouse_id.isin(fpS1_mice)],
         x='pharma_day', y='outcome_w', order=inactivation_labels,
-        color=stim_palette[1], ax=ax, linewidth=2
+        color=reward_palette[1], ax=ax, linewidth=2
     )
 
     ax.set_title('fpS1')

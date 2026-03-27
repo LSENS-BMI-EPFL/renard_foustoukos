@@ -31,6 +31,7 @@ from nwb_wrappers.nwb_reader_functions import get_image_mask
 MOUSE_ID        = 'GF314'
 NWB_FILE        = os.path.join(io.nwb_dir, 'GF314_28112020_171800.nwb')
 OPS_PATH        = io.adjust_path_to_host(os.path.join(io.processed_dir, 'GF314_ops.npy'))
+SEGMENTATION_INFO = ['ophys', 'all_cells', 'my_plane_segmentation']
 
 sampling_rate   = 30
 day_for_trials  = 2
@@ -70,7 +71,7 @@ lmi_df = pd.read_csv(os.path.join(io.processed_dir, 'lmi_results.csv'))
 lmi_df = lmi_df[lmi_df['mouse_id'] == MOUSE_ID].reset_index(drop=True)
 print(f"LMI entries for {MOUSE_ID}: {len(lmi_df)}")
 
-image_masks  = get_image_mask(NWB_FILE)
+image_masks  = get_image_mask(NWB_FILE, SEGMENTATION_INFO)
 ops          = np.load(OPS_PATH, allow_pickle=True)
 mean_img     = ops.item()['meanImg']
 
@@ -224,7 +225,7 @@ ax_trans.spines['right'].set_visible(False)
 # #############################################################################
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-out_path = os.path.join(OUTPUT_DIR, f'fov_and_calcium_transients_{MOUSE_ID}.svg')
+out_path = os.path.join(OUTPUT_DIR, f'figure_3a.svg')
 fig.savefig(out_path, format='svg', dpi=300, bbox_inches='tight')
 print(f"\nSaved: {out_path}")
 

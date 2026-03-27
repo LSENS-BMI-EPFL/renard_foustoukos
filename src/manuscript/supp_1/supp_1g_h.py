@@ -1,9 +1,9 @@
 """
-Supplementary Figure 1i-j: Reaction times for auditory, whisker, and no-stim
+Supplementary Figure 1g_h: Reaction times for auditory, whisker, and no-stim
 hit trials.
 
-Panel i: Mean reaction time per stimulus type across days (bar plot).
-Panel j: Mean reaction time across trials within Day 0 (line plot).
+Panel g: Mean reaction time per stimulus type across days (bar plot).
+Panel h: Mean reaction time across trials within Day 0 (line plot).
 
 Only hit trials (lick_flag == 1 and outcome == 1) are included.
 """
@@ -12,8 +12,10 @@ import os
 import sys
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
+from scipy.stats import mannwhitneyu
 
 sys.path.append(r'/home/aprenard/repos/fast-learning')
 import src.utils.utils_io as io
@@ -48,11 +50,16 @@ table = pd.read_csv(bh_path)
 table = table[table['lick_flag'] == 1]
 table['reaction_time'] = table['lick_time'] - table['stim_onset']
 
-# Re-index per stim type within session
-for trial_col, stim_col in [('trial_w', 'whisker_stim'),
-                              ('trial_a', 'auditory_stim'),
-                              ('trial_c', 'no_stim')]:
-    table[trial_col] = table.groupby(['mouse_id', 'session_id']).cumcount()
+# Correcting spurious lick time entries on catch trials (30 data points from two mice)).
+# 1.3 because of artefact window.
+table.loc[table['reaction_time'] > 1.3, 'reaction_time'] = np.nan
+
+# Re-index per stim type within session (only counting hits of that stimulus type)
+for stim_col, outcome_col, trial_col, *_ in STIM_DEFS:
+    mask = (table[stim_col] == 1) & (table[outcome_col] == 1)
+    table.loc[mask, trial_col] = (
+        table[mask].groupby(['mouse_id', 'session_id']).cumcount()
+    )
 
 
 # ============================================================================
@@ -73,6 +80,39 @@ for stim_col, outcome_col, trial_col, stim_label, rpi, rmi in STIM_DEFS:
             'reaction_time': grp['reaction_time'].mean(),
         })
 rt_df = pd.DataFrame(rt_rows)
+
+
+# ============================================================================
+# Stats panel g: Mann-Whitney R+ vs R- per stim type × day
+# ============================================================================
+
+def _stars(p):
+    if p < 0.001: return '***'
+    if p < 0.01:  return '**'
+    if p < 0.05:  return '*'
+    return 'n.s.'
+
+
+stats_g_rows = []
+for stim_label in rt_df['stim_type'].unique():
+    for day in DAYS:
+        rp = rt_df[(rt_df['stim_type'] == stim_label) &
+                   (rt_df['day'] == day) &
+                   (rt_df['reward_group'] == 'R+')]['reaction_time'].values
+        rm = rt_df[(rt_df['stim_type'] == stim_label) &
+                   (rt_df['day'] == day) &
+                   (rt_df['reward_group'] == 'R-')]['reaction_time'].values
+        if len(rp) >= 3 and len(rm) >= 3:
+            stat, p = mannwhitneyu(rp, rm, alternative='two-sided')
+        else:
+            stat, p = np.nan, np.nan
+        stats_g_rows.append({
+            'stim_type': stim_label, 'day': day,
+            'n_rplus': len(rp), 'n_rminus': len(rm),
+            'U_stat': stat, 'p_value': p, 'significance': _stars(p),
+        })
+stats_g_df = pd.DataFrame(stats_g_rows)
+
 
 sns.set_theme(context='paper', style='ticks', font='sans-serif', font_scale=1,
               rc={'pdf.fonttype': 42, 'ps.fonttype': 42, 'svg.fonttype': 'none'})
@@ -102,6 +142,15 @@ for ax, (stim_col, outcome_col, trial_col, stim_label, rpi, rmi) in zip(axes_i, 
         xs = [day_positions[d] + group_offsets[rg] for d in mouse_data['day']]
         ax.scatter(xs, mouse_data['reaction_time'].values,
                    color='grey', s=8, alpha=0.5, zorder=5, linewidths=0)
+
+    # Significance stars
+    y_max = df_plot['reaction_time'].max()
+    for i, day in enumerate(DAYS):
+        row = stats_g_df[(stats_g_df['stim_type'] == stim_label) &
+                         (stats_g_df['day'] == day)]
+        if not row.empty and row.iloc[0]['p_value'] < 0.05:
+            ax.text(i, y_max * 1.05, row.iloc[0]['significance'],
+                    ha='center', va='bottom', fontsize=8)
 
     ax.set_title(stim_label)
     ax.set_xlabel('Day')
@@ -158,21 +207,59 @@ plt.tight_layout()
 
 
 # ============================================================================
+# Stats panel h: Mann-Whitney R+ vs R- per stim type × trial bin
+# ============================================================================
+
+stats_h_rows = []
+for stim_col, outcome_col, trial_col, stim_label, rpi, rmi in STIM_DEFS:
+    df_stim = table.loc[
+        (table[stim_col] == 1) &
+        (table[outcome_col] == 1) &
+        (table['day'] == 0) &
+        (table[trial_col] < MAX_TRIALS_RT)
+    ]
+    mouse_counts = df_stim.groupby(trial_col)['mouse_id'].nunique()
+    valid_trials = mouse_counts[mouse_counts >= MIN_MICE_PER_TRIAL].index
+
+    for trial_bin in valid_trials:
+        rp = df_stim[(df_stim['reward_group'] == 'R+') &
+                     (df_stim[trial_col] == trial_bin)]['reaction_time'].values
+        rm = df_stim[(df_stim['reward_group'] == 'R-') &
+                     (df_stim[trial_col] == trial_bin)]['reaction_time'].values
+        if len(rp) >= 3 and len(rm) >= 3:
+            stat, p = mannwhitneyu(rp, rm, alternative='two-sided')
+        else:
+            stat, p = np.nan, np.nan
+        stats_h_rows.append({
+            'stim_type': stim_label, 'trial_bin': trial_bin,
+            'n_rplus': len(rp), 'n_rminus': len(rm),
+            'U_stat': stat, 'p_value': p, 'significance': _stars(p),
+        })
+stats_h_df = pd.DataFrame(stats_h_rows)
+
+
+# ============================================================================
 # Save
 # ============================================================================
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-fig_i.savefig(os.path.join(OUTPUT_DIR, 'supp_1i.svg'), format='svg', dpi=300, bbox_inches='tight')
-print("Saved: supp_1i.svg")
+fig_i.savefig(os.path.join(OUTPUT_DIR, 'supp_1g.svg'), format='svg', dpi=300, bbox_inches='tight')
+print("Saved: supp_1g.svg")
 
-fig_j.savefig(os.path.join(OUTPUT_DIR, 'supp_1j.svg'), format='svg', dpi=300, bbox_inches='tight')
-print("Saved: supp_1j.svg")
+fig_j.savefig(os.path.join(OUTPUT_DIR, 'supp_1h.svg'), format='svg', dpi=300, bbox_inches='tight')
+print("Saved: supp_1h.svg")
 
-rt_df.to_csv(os.path.join(OUTPUT_DIR, 'supp_1i_data.csv'), index=False)
-print("Saved: supp_1i_data.csv")
+rt_df.to_csv(os.path.join(OUTPUT_DIR, 'supp_1g_data.csv'), index=False)
+print("Saved: supp_1g_data.csv")
 
-pd.DataFrame(rt_day0_rows).to_csv(os.path.join(OUTPUT_DIR, 'supp_1j_data.csv'), index=False)
-print("Saved: supp_1j_data.csv")
+stats_g_df.to_csv(os.path.join(OUTPUT_DIR, 'supp_1g_stats.csv'), index=False)
+print("Saved: supp_1g_stats.csv")
+
+pd.DataFrame(rt_day0_rows).to_csv(os.path.join(OUTPUT_DIR, 'supp_1h_data.csv'), index=False)
+print("Saved: supp_1h_data.csv")
+
+stats_h_df.to_csv(os.path.join(OUTPUT_DIR, 'supp_1h_stats.csv'), index=False)
+print("Saved: supp_1h_stats.csv")
 
 plt.show()

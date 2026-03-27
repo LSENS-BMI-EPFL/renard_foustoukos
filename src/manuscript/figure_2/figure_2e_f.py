@@ -16,7 +16,7 @@ from scipy.stats import mannwhitneyu
 
 sys.path.append('/home/aprenard/repos/fast-learning')
 import src.utils.utils_io as io
-from src.utils.utils_plot import stim_palette
+from src.utils.utils_plot import stim_palette, reward_palette
 
 
 OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_2', 'output')
@@ -149,7 +149,7 @@ def panel_e_opto_timecourse(
         sns.lineplot(
             data=data.loc[data.mouse_id == imouse],
             x='opto_day', y='outcome_w', estimator=np.mean,
-            color=stim_palette[1], alpha=0.6, legend=False,
+            color=reward_palette[1], alpha=0.6, legend=False,
             ax=ax, marker=None, err_style='bars', linewidth=1
         )
 
@@ -167,7 +167,7 @@ def panel_e_opto_timecourse(
     sns.pointplot(
         data=data.loc[data.mouse_id.isin(wS1_mice)],
         x='opto_day', y='outcome_w', order=inactivation_labels,
-        color=stim_palette[1], ax=ax, linewidth=2
+        color=reward_palette[1], ax=ax, linewidth=2
     )
 
     # Add dots for individual points
@@ -186,7 +186,7 @@ def panel_e_opto_timecourse(
     sns.stripplot(
         data=data.loc[data.mouse_id.isin(wS1_mice)],
         x='opto_day', y='outcome_w', order=inactivation_labels,
-        color=stim_palette[1], ax=ax, jitter=False,
+        color=reward_palette[1], ax=ax, jitter=False,
         dodge=True, alpha=0.5, size=4
     )
 
@@ -214,7 +214,7 @@ def panel_e_opto_timecourse(
         sns.lineplot(
             data=data.loc[data.mouse_id == imouse],
             x='opto_day', y='outcome_w', estimator=np.mean,
-            color=stim_palette[1], alpha=0.6, legend=False,
+            color=reward_palette[1], alpha=0.6, legend=False,
             ax=ax, marker=None, err_style='bars', linewidth=1
         )
 
@@ -232,7 +232,7 @@ def panel_e_opto_timecourse(
     sns.pointplot(
         data=data.loc[data.mouse_id.isin(fpS1_mice)],
         x='opto_day', y='outcome_w', order=inactivation_labels,
-        color=stim_palette[1], ax=ax, linewidth=2
+        color=reward_palette[1], ax=ax, linewidth=2
     )
 
     ax.set_title('fpS1')
@@ -376,7 +376,7 @@ def panel_f_opto_barplot(
         x='day_label',
         y='outcome_w',
         hue='area',
-        palette=[stim_palette[1]],
+        palette=[reward_palette[1]],
         width=0.3,
         dodge=True,
         order=day_labels,

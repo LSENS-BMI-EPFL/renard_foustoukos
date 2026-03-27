@@ -1,5 +1,5 @@
 """
-Figure 4j: Reactivation rate across days, R+ vs R-
+Figure 4h: Reactivation rate across days, R+ vs R-
 
 Grouped bar plot (one bar per group per day) showing reactivation event
 frequency (events/min) across the 5 experimental days. Individual mouse
@@ -49,10 +49,10 @@ def _significance_stars(p):
 
 
 # ============================================================================
-# Panel j
+# Panel h
 # ============================================================================
 
-def panel_j_reactivation_rate(
+def panel_h_reactivation_rate(
     r_plus_results,
     r_minus_results,
     days=DAYS,
@@ -64,8 +64,8 @@ def panel_j_reactivation_rate(
     Generate Figure 4 Panel j: reactivation frequency per day, R+ vs R-.
 
     Saves:
-        figure_4j_data.csv: mouse_id, reward_group, day, event_frequency
-        figure_4j_stats.csv: Mann-Whitney U results per day
+        figure_4h_data.csv: mouse_id, reward_group, day, event_frequency
+        figure_4h_stats.csv: Mann-Whitney U results per day
     """
     sns.set_theme(context='paper', style='ticks', palette='deep',
                   font='sans-serif', font_scale=1)
@@ -172,17 +172,17 @@ def panel_j_reactivation_rate(
     plt.tight_layout()
 
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, f'figure_4j.{save_format}'),
+    plt.savefig(os.path.join(output_dir, f'figure_4h.{save_format}'),
                 format=save_format, dpi=dpi, bbox_inches='tight')
     plt.close()
-    print(f"Figure 4j saved to: {os.path.join(output_dir, 'figure_4j.' + save_format)}")
+    print(f"Figure 4h saved to: {os.path.join(output_dir, 'figure_4h.' + save_format)}")
 
     # Save CSVs
     df[df['mouse_id'] != ''].to_csv(
-        os.path.join(output_dir, 'figure_4j_data.csv'), index=False)
+        os.path.join(output_dir, 'figure_4h_data.csv'), index=False)
     pd.DataFrame(stats_rows).to_csv(
-        os.path.join(output_dir, 'figure_4j_stats.csv'), index=False)
-    print(f"Figure 4j data/stats saved to: {output_dir}")
+        os.path.join(output_dir, 'figure_4h_stats.csv'), index=False)
+    print(f"Figure 4h data/stats saved to: {output_dir}")
 
 
 # ============================================================================
@@ -204,4 +204,4 @@ if __name__ == '__main__':
     r_minus_results = results_data['r_minus_results']
     print(f"Loaded results for {len(r_plus_results)} R+ mice and {len(r_minus_results)} R- mice")
 
-    panel_j_reactivation_rate(r_plus_results, r_minus_results)
+    panel_h_reactivation_rate(r_plus_results, r_minus_results)

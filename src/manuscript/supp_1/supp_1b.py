@@ -44,6 +44,7 @@ avg_performance = (day_data
                    .groupby(['day', 'mouse_id', 'reward_group'])['outcome_w']
                    .mean()
                    .reset_index())
+avg_performance['outcome_w'] *= 100  # convert to percentage
 
 
 # ============================================================================
