@@ -46,7 +46,7 @@ OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_3', 'output')
 # ============================================================================
 
 def load_and_process_data(
-    similarity_metric='pearson',
+    similarity_metric='cosine',
     select_lmi=False,
     zscore=False,
     projection_type=None,
@@ -57,7 +57,7 @@ def load_and_process_data(
     Load imaging data and compute trial-by-trial similarity matrices.
 
     Args:
-        similarity_metric: 'pearson' or 'spearman'
+        similarity_metric: 'pearson', 'spearman', or 'cosine'
         select_lmi: If True, restrict to LMI-significant cells
         zscore: If True, z-score responses within each day to remove recording drift
         projection_type: Cell type filter ('wS2', 'wM1', or None for all cells)
@@ -70,9 +70,9 @@ def load_and_process_data(
         mice_rew: List of R+ mouse IDs
         mice_nonrew: List of R- mouse IDs
     """
-    if similarity_metric not in ('pearson', 'spearman'):
+    if similarity_metric not in ('pearson', 'spearman', 'cosine'):
         raise ValueError(
-            f"similarity_metric must be 'pearson' or 'spearman', got '{similarity_metric}'"
+            f"similarity_metric must be 'pearson', 'spearman', or 'cosine', got '{similarity_metric}'"
         )
 
     _, _, mice, db = io.select_sessions_from_db(io.db_path, io.nwb_dir, two_p_imaging='yes')
@@ -149,6 +149,12 @@ def _compute_similarity_matrix(vector, similarity_metric):
         cm = np.corrcoef(vector.values.T)
     elif similarity_metric == 'spearman':
         cm, _ = spearmanr(vector.values.T, axis=1)
+    elif similarity_metric == 'cosine':
+        data = vector.values.T  # (trials, cells)
+        norms = np.linalg.norm(data, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1, norms)
+        normalized = data / norms
+        cm = normalized @ normalized.T
     np.fill_diagonal(cm, np.nan)
     return cm
 
@@ -228,7 +234,7 @@ def panel_h_correlation_matrices(
     corr_matrices_nonrew=None,
     mice_rew=None,
     mice_nonrew=None,
-    similarity_metric='spearman',
+    similarity_metric='cosine',
     select_lmi=False,
     zscore=False,
     projection_type=None,
@@ -297,6 +303,7 @@ def panel_h_correlation_matrices(
     metric_label = {
         'pearson': 'Pearson Correlation',
         'spearman': 'Spearman Correlation',
+        'cosine': 'Cosine Similarity',
     }[similarity_metric]
     cbar = fig.colorbar(im1, cax=ax_cbar, label=metric_label)
     cbar.set_ticks([vmin, vmax])
@@ -340,7 +347,7 @@ def panel_i_within_day_correlations(
     corr_matrices_nonrew=None,
     mice_rew=None,
     mice_nonrew=None,
-    similarity_metric='spearman',
+    similarity_metric='cosine',
     select_lmi=False,
     zscore=False,
     projection_type=None,
@@ -426,7 +433,7 @@ def panel_i_within_day_correlations(
         color = reward_palette[1] if rg == 'R+' else reward_palette[0]
         ax.plot(range(len(DAYS)), mouse_data['correlation'].values, color=color, alpha=0.3, linewidth=0.8, zorder=1)
 
-    ylim_top = 0.6 if similarity_metric == 'pearson' else 0.3
+    ylim_top = 0.8 if similarity_metric in ('pearson', 'cosine') else 0.3
     for day in DAYS:
         ax.text(DAYS.index(day), ylim_top * 0.95, _significance_stars(stats_dict[day]), ha='center', va='bottom', fontsize=9)
 
@@ -460,7 +467,7 @@ def panel_j_reorganization_index(
     corr_matrices_nonrew=None,
     mice_rew=None,
     mice_nonrew=None,
-    similarity_metric='spearman',
+    similarity_metric='cosine',
     select_lmi=False,
     zscore=False,
     projection_type=None,
@@ -514,7 +521,7 @@ def panel_j_reorganization_index(
         dodge=True, ax=ax, size=4, color='grey', legend=False,
     )
 
-    ylim_top = 0.3 if similarity_metric == 'pearson' else 0.15
+    ylim_top = 0.3 if similarity_metric in ('pearson', 'cosine') else 0.15
     p_text = 'p<0.001' if p < 0.001 else f'p={p:.3f}' if p < 0.01 else f'p={p:.2f}'
     ax.text(0, ylim_top * 0.95, p_text, ha='center', va='bottom', fontsize=9)
 
@@ -546,14 +553,14 @@ def panel_j_reorganization_index(
 # ============================================================================
 
 if __name__ == '__main__':
-    SIMILARITY_METRIC = 'spearman'  # 'pearson' or 'spearman'
+    CORRELATION_METHOD = 'cosine'  # 'pearson', 'spearman', or 'cosine'
     SELECT_LMI = False
     ZSCORE = False
     PROJECTION_TYPE = None  # 'wS2', 'wM1', or None
 
     print("Loading data and computing similarity matrices...")
     corr_matrices_rew, corr_matrices_nonrew, mice_rew, mice_nonrew = load_and_process_data(
-        similarity_metric=SIMILARITY_METRIC,
+        similarity_metric=CORRELATION_METHOD,
         select_lmi=SELECT_LMI,
         zscore=ZSCORE,
         projection_type=PROJECTION_TYPE,
@@ -564,7 +571,7 @@ if __name__ == '__main__':
         corr_matrices_nonrew=corr_matrices_nonrew,
         mice_rew=mice_rew,
         mice_nonrew=mice_nonrew,
-        similarity_metric=SIMILARITY_METRIC,
+        similarity_metric=CORRELATION_METHOD,
         select_lmi=SELECT_LMI,
         zscore=ZSCORE,
         projection_type=PROJECTION_TYPE,
