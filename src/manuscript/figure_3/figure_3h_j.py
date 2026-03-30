@@ -151,6 +151,7 @@ def _compute_similarity_matrix(vector, similarity_metric):
         cm, _ = spearmanr(vector.values.T, axis=1)
     elif similarity_metric == 'cosine':
         data = vector.values.T  # (trials, cells)
+        data = np.nan_to_num(data, nan=0.0)
         norms = np.linalg.norm(data, axis=1, keepdims=True)
         norms = np.where(norms == 0, 1, norms)
         normalized = data / norms

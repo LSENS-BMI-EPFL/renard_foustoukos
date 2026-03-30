@@ -69,7 +69,7 @@ select_lmi = False
 zscore = False
 projection_type = None  # 'wS2', 'wM1' or None
 n_min_proj = 5
-similarity_metric = 'spearman'
+similarity_metric = 'cosine'
 sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1)
 
 _, _, mice, db = io.select_sessions_from_db(io.db_path,
@@ -170,10 +170,15 @@ def compute_cosine_similarity_matrix(vector):
     """
     Compute cosine similarity matrix for a single mouse (200x200).
     Cosine similarity is less sensitive to magnitude differences than correlation.
+    NaN values are replaced with 0 (absent cells contribute nothing to similarity).
     """
-    from sklearn.metrics.pairwise import cosine_similarity
-    cm = cosine_similarity(vector.values.T)
-    np.fill_diagonal(cm, np.nan)  # Exclude diagonal
+    data = vector.values.T  # (trials, cells)
+    data = np.nan_to_num(data, nan=0.0)
+    norms = np.linalg.norm(data, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1, norms)
+    normalized = data / norms
+    cm = normalized @ normalized.T
+    np.fill_diagonal(cm, np.nan)
     return cm
 
 def compute_spearman_correlation_matrix(vector):
@@ -995,7 +1000,7 @@ n_learning_trials = 80  # Number of learning trials to take (last 80)
 substract_baseline = True
 select_responsive_cells = False
 select_lmi = False  # Use LMI-selected cells
-similarity_metric = 'spearman'  # 'pearson', 'spearman', or 'cosine'
+similarity_metric = 'cosine'  # 'pearson', 'spearman', or 'cosine'
 sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1)
 
 _, _, mice, db = io.select_sessions_from_db(io.db_path,
@@ -1137,7 +1142,7 @@ print(f"\nLoaded {len(mouse_data_rew)} R+ mice and {len(mouse_data_nonrew)} R- m
 # Compute correlation matrices for each mouse
 # --------------------------------------------
 
-def compute_correlation_matrix(mouse_data, similarity_metric='spearman'):
+def compute_correlation_matrix(mouse_data, similarity_metric='cosine'):
     """
     Compute trial-by-trial correlation matrix for one mouse.
     
@@ -1283,7 +1288,7 @@ sampling_rate = 30
 n_learning_trials = 80  # Number of trials to analyze
 substract_baseline = True
 select_lmi = False  # Use LMI-selected cells
-similarity_metric = 'spearman'  # 'pearson', 'spearman', or 'cosine'
+similarity_metric = 'cosine'  # 'pearson', 'spearman', or 'cosine'
 
 print("\n" + "="*80)
 print("DAY 0 TIME WINDOW ANALYSIS")
@@ -1370,7 +1375,7 @@ print(f"\nLoaded {len(mice_rew_tw)} R+ mice and {len(mice_nonrew_tw)} R- mice")
 # Compute correlation matrices for each time window
 # --------------------------------------------------
 
-def compute_corr_matrix_from_array(data_array, similarity_metric='spearman'):
+def compute_corr_matrix_from_array(data_array, similarity_metric='cosine'):
     """
     Compute trial-by-trial correlation matrix.
 
