@@ -198,28 +198,28 @@ def generate_panel(
     # Save figure and data
     os.makedirs(save_path, exist_ok=True)
 
-    output_file = os.path.join(save_path, f'figure_1h.{save_format}')
+    output_file = os.path.join(save_path, f'figure_1g.{save_format}')
     plt.savefig(output_file, format=save_format, dpi=dpi, bbox_inches='tight')
     # plt.close()
 
     # Save data and statistics
-    data_file_single = os.path.join(save_path, 'figure_1h_raw_data.csv')
-    stats_file_single = os.path.join(save_path, 'figure_1h_raw_stats.csv')
+    data_file_single = os.path.join(save_path, 'figure_1g_raw_data.csv')
+    stats_file_single = os.path.join(save_path, 'figure_1g_raw_stats.csv')
     df_single.to_csv(data_file_single, index=False)
     pd.DataFrame(
         p_values_single, columns=['trial_w', 'p_value']
     ).to_csv(stats_file_single, index=False)
 
-    data_file_learning = os.path.join(save_path, 'figure_1h_learning_data.csv')
-    stats_file_learning = os.path.join(save_path, 'figure_1h_learning_stats.csv')
+    data_file_learning = os.path.join(save_path, 'figure_1g_learning_data.csv')
+    stats_file_learning = os.path.join(save_path, 'figure_1g_learning_stats.csv')
     df_learning.to_csv(data_file_learning, index=False)
     pd.DataFrame(
         p_values_learning, columns=['trial_w', 'p_value']
     ).to_csv(stats_file_learning, index=False)
 
-    print(f"Figure 1h saved to: {output_file}")
-    print(f"Figure 1h data saved to: {data_file_single} and {data_file_learning}")
-    print(f"Figure 1h statistics saved to: {stats_file_single} and {stats_file_learning}")
+    print(f"Figure 1g saved to: {output_file}")
+    print(f"Figure 1g data saved to: {data_file_single} and {data_file_learning}")
+    print(f"Figure 1g statistics saved to: {stats_file_single} and {stats_file_learning}")
 
 
 # ============================================================================

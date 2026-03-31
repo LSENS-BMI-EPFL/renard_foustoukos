@@ -23,17 +23,17 @@ OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_1', 'output')
 
 
 # ============================================================================
-# Panel f: Performance across training days
+# Panel e: Performance across training days
 # ============================================================================
 
-def panel_f_performance_across_days(
+def panel_e_performance_across_days(
     table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_imagingmice_table_5days_cut.csv'),
     save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
     """
-    Generate Figure 1 Panel f: Performance across training days.
+    Generate Figure 1 Panel e: Performance across training days.
 
     Shows average lick probability across 5 days of training for all imaging mice,
     separated by reward group (R+ and R-) and trial type (auditory, whisker, no-stim).
@@ -139,23 +139,23 @@ def panel_f_performance_across_days(
     # Save figure and data
     os.makedirs(save_path, exist_ok=True)
 
-    output_file = os.path.join(save_path, f'figure_1f.{save_format}')
+    output_file = os.path.join(save_path, f'figure_1e.{save_format}')
     plt.savefig(output_file, format=save_format, dpi=dpi, bbox_inches='tight')
     # plt.close()
 
     # Save data
-    data_file = os.path.join(save_path, 'figure_1f_data.csv')
+    data_file = os.path.join(save_path, 'figure_1e_data.csv')
     table_agg.to_csv(data_file, index=False)
 
-    print(f"Figure 1f saved to: {output_file}")
-    print(f"Figure 1f data saved to: {data_file}")
+    print(f"Figure 1e saved to: {output_file}")
+    print(f"Figure 1e data saved to: {data_file}")
 
 
 # ============================================================================
-# Panel g: Performance comparison for days 0, +1, +2
+# Panel f: Performance comparison for days 0, +1, +2
 # ============================================================================
 
-def panel_g_performance_barplot(
+def panel_f_performance_barplot(
     table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_imagingmice_table_5days_cut.csv'),
     days_of_interest=[0, 1, 2],
     save_path=OUTPUT_DIR,
@@ -163,7 +163,7 @@ def panel_g_performance_barplot(
     dpi=300
 ):
     """
-    Generate Figure 1 Panel g: Performance comparison with statistics.
+    Generate Figure 1 Panel f: Performance comparison with statistics.
 
     Shows whisker trial performance for days 0, +1, +2 with bar plots
     and statistical comparisons between reward groups.
@@ -280,19 +280,19 @@ def panel_g_performance_barplot(
     # Save figure and data
     os.makedirs(save_path, exist_ok=True)
 
-    output_file = os.path.join(save_path, f'figure_1g.{save_format}')
+    output_file = os.path.join(save_path, f'figure_1f.{save_format}')
     plt.savefig(output_file, format=save_format, dpi=dpi, bbox_inches='tight')
     # plt.close()
 
     # Save data and statistics
-    data_file = os.path.join(save_path, 'figure_1g_data.csv')
-    stats_file = os.path.join(save_path, 'figure_1g_stats.csv')
+    data_file = os.path.join(save_path, 'figure_1f_data.csv')
+    stats_file = os.path.join(save_path, 'figure_1f_stats.csv')
     avg_performance.to_csv(data_file, index=False)
     pd.DataFrame(stats).to_csv(stats_file, index=False)
 
-    print(f"Figure 1g saved to: {output_file}")
-    print(f"Figure 1g data saved to: {data_file}")
-    print(f"Figure 1g statistics saved to: {stats_file}")
+    print(f"Figure 1f saved to: {output_file}")
+    print(f"Figure 1f data saved to: {data_file}")
+    print(f"Figure 1f statistics saved to: {stats_file}")
 
 
 # ============================================================================
@@ -301,5 +301,5 @@ def panel_g_performance_barplot(
 
 if __name__ == '__main__':
     # Generate both panels
-    panel_f_performance_across_days()
-    panel_g_performance_barplot()
+    panel_e_performance_across_days()
+    panel_f_performance_barplot()

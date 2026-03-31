@@ -92,11 +92,11 @@ def generate_panel(
             )
 
         # Save figure
-        output_file = os.path.join(save_path, f'figure_1e_{mouse_id}.{save_format}')
+        output_file = os.path.join(save_path, f'figure_1d_{mouse_id}.{save_format}')
         plt.savefig(output_file, format=save_format, dpi=dpi, bbox_inches='tight')
         # plt.close()
 
-        print(f"Figure 1e ({mouse_id}) saved to: {output_file}")
+        print(f"Figure 1d ({mouse_id}) saved to: {output_file}")
 
     # Save data: behavioral table filtered for these mice and days
     all_data = []
@@ -106,9 +106,9 @@ def generate_panel(
         d = d.loc[d.trial_id <= max_trials]
         all_data.append(d)
     pd.concat(all_data, ignore_index=True).to_csv(
-        os.path.join(save_path, 'figure_1e_data.csv'), index=False
+        os.path.join(save_path, 'figure_1d_data.csv'), index=False
     )
-    print(f"Figure 1e data saved to: {os.path.join(save_path, 'figure_1e_data.csv')}")
+    print(f"Figure 1d data saved to: {os.path.join(save_path, 'figure_1d_data.csv')}")
 
 
 # ============================================================================
