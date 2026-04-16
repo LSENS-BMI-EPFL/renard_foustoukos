@@ -1,8 +1,9 @@
 """
-Figure 1c: Lick raster plot illustrating task structure
+Figure 1c: Average behavioral performance across imaging mice
 
-This script generates Panel c for Figure 1, showing behavioral responses
-(licking) across different trial types aligned to stimulus onset.
+This script generates Panel c for Figure 1:
+- Panel c (left): Performance across 5 days for all imaging mice (line plot)
+- Panel c (right): Performance comparison for days 0, +1, +2 (bar plot with statistics)
 """
 
 import os
@@ -11,205 +12,287 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.signal import hilbert, find_peaks
-from scipy.ndimage import gaussian_filter1d
+from scipy.stats import mannwhitneyu
 
 sys.path.append('/home/aprenard/repos/fast-learning')
 import src.utils.utils_io as io
-from src.utils.utils_plot import stim_palette
+from src.utils.utils_plot import behavior_palette
 
 
 OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_1', 'output')
 
 
 # ============================================================================
-# Helper Functions
+# Panel c (left): Performance across training days
 # ============================================================================
 
-def detect_piezo_lick_times(
-    lick_data,
-    ni_session_sr=5000,
-    sigma=100,
-    height=None,
-    distance=None,
-    prominence=None,
-    width=None
-):
-    """
-    Detect lick times from piezo sensor data using Hilbert transform envelope.
-
-    The envelope is extracted using the Hilbert transform and then smoothed with
-    a Gaussian filter. Peaks in the envelope correspond to individual licks.
-
-    Args:
-        lick_data: Raw piezo lick trace (1D numpy array)
-        ni_session_sr: Sampling rate in Hz
-        sigma: Standard deviation of Gaussian filter for envelope smoothing
-        height: Minimum peak height for find_peaks
-        distance: Minimum distance between peaks (in samples)
-        prominence: Minimum prominence for find_peaks
-        width: Minimum width for find_peaks
-
-    Returns:
-        lick_times: Array of detected lick times in seconds
-    """
-    # Extract envelope using Hilbert transform
-    analytic_signal = hilbert(lick_data)
-    envelope = np.abs(analytic_signal)
-
-    # Smooth the envelope
-    envelope = gaussian_filter1d(envelope, sigma=sigma)
-
-    # Detect peaks in the smoothed envelope
-    peaks, _ = find_peaks(
-        envelope,
-        height=height,
-        distance=distance,
-        prominence=prominence,
-        width=width
-    )
-
-    lick_times = peaks / ni_session_sr
-
-    return lick_times
-
-
-# ============================================================================
-# Main Panel Generation
-# ============================================================================
-
-def generate_panel(
-    results_file=os.path.join(io.processed_dir, 'behavior', 'GF305_29112020_103331_results.txt'),
+def panel_c_left_performance_across_days(
+    table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_imagingmice_table_5days_cut.csv'),
     save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
     """
-    Generate Figure 1 Panel c: Lick raster plot.
+    Generate Figure 1 Panel c (left): Performance across training days.
 
-    Shows licking behavior aligned to stimulus onset for whisker, auditory,
-    and no-stimulus trials to illustrate the task structure.
+    Shows average lick probability across 5 days of training for all imaging mice,
+    separated by reward group (R+ and R-) and trial type (auditory, whisker, no-stim).
 
     Args:
-        results_file: Path to the preprocessed Results.txt file
-        save_path: Directory to save output figure
+        table_path: Path to CSV file containing behavioral data
+        save_path: Directory to save output figure and data
         save_format: Figure format ('svg', 'png', 'pdf')
         dpi: Resolution for saved figure
     """
 
-    results_file = io.adjust_path_to_host(results_file)
+    # Load behavioral data
+    table_path = io.adjust_path_to_host(table_path)
+    table = pd.read_csv(table_path)
 
-    # Load behavioral results
-    df_results = pd.read_csv(results_file, sep=r'\s+', engine='python')
+    # Remove spurious whisker trials from mapping sessions (days -2 and -1)
+    table.loc[table.day.isin([-2, -1]), 'outcome_w'] = np.nan
+    table.loc[table.day.isin([-2, -1]), 'hr_w'] = np.nan
 
-    # Piezo sensor parameters
-    piezo_sr = 100000  # Hz
+    # Average performance per session
+    table_agg = table.groupby(
+        ['mouse_id', 'session_id', 'reward_group', 'day'],
+        as_index=False
+    )[['outcome_c', 'outcome_a', 'outcome_w']].agg(np.mean)
 
-    # Detect licks for each trial
-    df_lick_raster = pd.DataFrame(columns=['trialnumber', 'trial_type', 'lick_times'])
-    trial_counter = 1
+    # Convert performance to percentage
+    table_agg[['outcome_c', 'outcome_a', 'outcome_w']] = \
+        table_agg[['outcome_c', 'outcome_a', 'outcome_w']] * 100
 
-    for _, trial in df_results.iterrows():
-        # Skip early lick trials
-        if trial['EarlyLick'] == 1:
-            continue
+    # Convert day to string for categorical plotting
+    table_agg['day'] = table_agg['day'].astype(str)
 
-        # Determine trial type
-        if trial['Whisker/NoWhisker'] == 1:
-            trial_type = 'whisker'
-        elif trial['Auditory/NoAuditory'] == 1:
-            trial_type = 'auditory'
-        elif trial['Stim/NoStim'] == 0:
-            trial_type = 'no_stim'
-        else:
-            continue
+    # Set plotting theme
+    sns.set_theme(
+        context='paper',
+        style='ticks',
+        palette='deep',
+        font='sans-serif',
+        font_scale=1,
+        rc={
+            'xtick.major.width': 1,
+            'ytick.major.width': 1,
+            'pdf.fonttype': 42,
+            'ps.fonttype': 42,
+            'svg.fonttype': 'none'
+        }
+    )
 
-        # Load and process lick trace
-        lick_traces_dir = io.adjust_path_to_host(os.path.join(io.processed_dir, 'behavior', 'GF305_lick_traces'))
-        lick_file = os.path.join(lick_traces_dir, f"LickTrace{int(trial['trialnumber'])}.bin")
-        lick_trace = np.fromfile(lick_file)[1::2]
+    # Create figure
+    fig = plt.figure(figsize=(6, 6))
+    ax = plt.gca()
 
-        lick_times = detect_piezo_lick_times(
-            lick_trace,
-            ni_session_sr=piezo_sr,
-            sigma=200,
-            height=0.04,
-            distance=piezo_sr * 0.05,
-            width=None
-        )
+    # Plot individual mouse traces (thin lines)
+    sns.lineplot(
+        data=table_agg, x='day', y='outcome_c', units='mouse_id',
+        estimator=None, hue="reward_group", hue_order=['R-', 'R+'],
+        palette=behavior_palette[4:6], alpha=0.4, legend=False,
+        ax=ax, marker=None, linewidth=1
+    )
+    sns.lineplot(
+        data=table_agg, x='day', y='outcome_a', units='mouse_id',
+        estimator=None, hue="reward_group", hue_order=['R-', 'R+'],
+        palette=behavior_palette[0:2], alpha=0.4, legend=False,
+        ax=ax, marker=None, linewidth=1
+    )
+    sns.lineplot(
+        data=table_agg, x='day', y='outcome_w', units='mouse_id',
+        estimator=None, hue="reward_group", hue_order=['R-', 'R+'],
+        palette=behavior_palette[2:4], alpha=0.4, legend=False,
+        ax=ax, marker=None, linewidth=1
+    )
 
-        df_lick_raster = pd.concat([
-            df_lick_raster,
-            pd.DataFrame({
-                'trialnumber': [trial_counter],
-                'trial_type': [trial_type],
-                'lick_times': [lick_times.tolist()]
-            })
-        ], ignore_index=True)
-        trial_counter += 1
-
-    # Remove mapping trials (keep only first 320 trials)
-    df_lick_raster = df_lick_raster[df_lick_raster.trialnumber <= 320]
-
-    # Plot licking raster
-    # Figure dimensions optimized for manuscript panel (in mm, converted to inches)
-    fig_width_mm = 45
-    fig_height_mm = 90
-    fig_width_in = fig_width_mm / 25.4
-    fig_height_in = fig_height_mm / 25.4
-
-    fig, ax = plt.subplots(figsize=(fig_width_in, fig_height_in))
-
-    # Color mapping for trial types
-    colors = {
-        'whisker': stim_palette[1],
-        'auditory': stim_palette[0],
-        'no_stim': stim_palette[2]
-    }
-
-    # Plot licks for each trial
-    for i, row in df_lick_raster.iterrows():
-        trial_type = row['trial_type']
-        # Adjust for 2 sec baseline in GF305 data
-        lick_times = np.array(row['lick_times']) - 2
-
-        ax.scatter(
-            lick_times,
-            np.full_like(lick_times, i + 0.5),
-            color=colors.get(trial_type, 'grey'),
-            s=1,
-            alpha=1,
-            marker='o',
-            linewidths=0
-        )
-
-    # Highlight stimulus period (0 to 1 second)
-    ax.axvspan(0, 1, color='lightgrey', alpha=0.5, zorder=0)
+    # Plot group averages (thick lines with markers)
+    sns.pointplot(
+        data=table_agg, x='day', y='outcome_c', estimator=np.mean,
+        palette=behavior_palette[4:6], hue="reward_group",
+        hue_order=['R-', 'R+'], alpha=1, legend=True,
+        ax=ax, linewidth=2
+    )
+    sns.pointplot(
+        data=table_agg, x='day', y='outcome_a', estimator=np.mean,
+        palette=behavior_palette[0:2], hue="reward_group",
+        hue_order=['R-', 'R+'], alpha=1, legend=True,
+        ax=ax, linewidth=2
+    )
+    sns.pointplot(
+        data=table_agg, x='day', y='outcome_w', estimator=np.mean,
+        palette=behavior_palette[2:4], hue="reward_group",
+        hue_order=['R-', 'R+'], alpha=1, legend=True,
+        ax=ax, linewidth=2
+    )
 
     # Formatting
-    ax.set_xlabel('Lick time from stim onset (secs)')
-    ax.set_ylabel('Trial')
-    ax.set_xlim([-1, 4])
-    sns.despine()
+    plt.xlabel('Training days')
+    plt.ylabel('Lick probability (%)')
+    plt.legend()
+    sns.despine(trim=True)
 
-    # Save figure
+    # Ensure tick thickness is set for SVG output
+    for axis in [ax.xaxis, ax.yaxis]:
+        axis.set_tick_params(width=1)
+
+    # Save figure and data
     os.makedirs(save_path, exist_ok=True)
-    output_file = os.path.join(save_path, f'figure_1c.{save_format}')
-    plt.savefig(output_file, format=save_format, dpi=dpi, bbox_inches='tight')
-    plt.close()
-    print(f"Figure 1c saved to: {output_file}")
 
-    # Save data: one row per lick event, time aligned to stimulus onset
-    lick_events = []
-    for _, row in df_lick_raster.iterrows():
-        for t in row['lick_times']:
-            lick_events.append({
-                'trialnumber': row['trialnumber'],
-                'trial_type': row['trial_type'],
-                'lick_time_s': t - 2,  # aligned to stimulus onset
-            })
-    pd.DataFrame(lick_events).to_csv(os.path.join(save_path, 'figure_1c_data.csv'), index=False)
-    print(f"Figure 1c data saved to: {os.path.join(save_path, 'figure_1c_data.csv')}")
+    output_file = os.path.join(save_path, f'figure_1c_left.{save_format}')
+    plt.savefig(output_file, format=save_format, dpi=dpi, bbox_inches='tight')
+    # plt.close()
+
+    # Save data
+    data_file = os.path.join(save_path, 'figure_1c_left_data.csv')
+    table_agg.to_csv(data_file, index=False)
+
+    print(f"Figure 1c (left) saved to: {output_file}")
+    print(f"Figure 1c (left) data saved to: {data_file}")
+
+
+# ============================================================================
+# Panel c (right): Performance comparison for days 0, +1, +2
+# ============================================================================
+
+def panel_c_right_performance_barplot(
+    table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_imagingmice_table_5days_cut.csv'),
+    days_of_interest=[0, 1, 2],
+    save_path=OUTPUT_DIR,
+    save_format='svg',
+    dpi=300
+):
+    """
+    Generate Figure 1 Panel c (right): Performance comparison with statistics.
+
+    Shows whisker trial performance for days 0, +1, +2 with bar plots
+    and statistical comparisons between reward groups.
+
+    Args:
+        table_path: Path to CSV file containing behavioral data
+        days_of_interest: List of day indices to compare
+        save_path: Directory to save output figure and data
+        save_format: Figure format ('svg', 'png', 'pdf')
+        dpi: Resolution for saved figure
+    """
+
+    # Load behavioral data
+    table_path = io.adjust_path_to_host(table_path)
+    table = pd.read_csv(table_path)
+
+    # Remove spurious whisker trials from mapping sessions
+    table.loc[table.day.isin([-2, -1]), 'outcome_w'] = np.nan
+    table.loc[table.day.isin([-2, -1]), 'hr_w'] = np.nan
+
+    # Average performance per session
+    table_agg = table.groupby(
+        ['mouse_id', 'session_id', 'reward_group', 'day'],
+        as_index=False
+    )[['outcome_c', 'outcome_a', 'outcome_w']].agg(np.mean)
+
+    # Convert performance to percentage
+    table_agg[['outcome_c', 'outcome_a', 'outcome_w']] = \
+        table_agg[['outcome_c', 'outcome_a', 'outcome_w']] * 100
+
+    # Convert day to string for categorical plotting
+    table_agg['day'] = table_agg['day'].astype(str)
+
+    # Select data for days of interest
+    day_data = table_agg[table_agg['day'].isin([str(d) for d in days_of_interest])]
+    avg_performance = day_data.groupby(
+        ['day', 'mouse_id', 'reward_group']
+    )['outcome_w'].mean().reset_index()
+
+    # Set plotting theme
+    sns.set_theme(
+        context='paper',
+        style='ticks',
+        palette='deep',
+        font='sans-serif',
+        font_scale=1,
+        rc={
+            'pdf.fonttype': 42,
+            'ps.fonttype': 42,
+            'svg.fonttype': 'none'
+        }
+    )
+
+    # Create figure
+    plt.figure(figsize=(8, 6))
+
+    # Bar plot
+    sns.barplot(
+        data=avg_performance,
+        x='day',
+        y='outcome_w',
+        hue='reward_group',
+        palette=behavior_palette[2:4][::-1],
+        width=0.3,
+        dodge=True
+    )
+
+    # Swarm plot for individual mice
+    sns.swarmplot(
+        data=avg_performance,
+        x='day',
+        y='outcome_w',
+        hue='reward_group',
+        dodge=True,
+        color='grey',
+        alpha=0.6,
+    )
+
+    # Formatting
+    plt.xlabel('Day')
+    plt.ylabel('Lick probability (%)')
+    plt.ylim([0, 100])
+    plt.legend(title='Reward group')
+    sns.despine(trim=True)
+
+    # Statistical testing: Mann-Whitney U test for each day
+    stats = []
+    for day in days_of_interest:
+        df_day = avg_performance[avg_performance['day'] == str(day)]
+        group_R_plus = df_day[df_day['reward_group'] == 'R+']['outcome_w']
+        group_R_minus = df_day[df_day['reward_group'] == 'R-']['outcome_w']
+
+        stat, p_value = mannwhitneyu(
+            group_R_plus, group_R_minus,
+            alternative='two-sided'
+        )
+        stats.append({'day': day, 'statistic': stat, 'p_value': p_value})
+
+        # Add significance stars to the plot
+        ax = plt.gca()
+        xpos = days_of_interest.index(day)
+        ypos = 95
+
+        if p_value < 0.001:
+            plt.text(xpos, ypos, '***', ha='center', va='bottom',
+                    color='black', fontsize=14)
+        elif p_value < 0.01:
+            plt.text(xpos, ypos, '**', ha='center', va='bottom',
+                    color='black', fontsize=14)
+        elif p_value < 0.05:
+            plt.text(xpos, ypos, '*', ha='center', va='bottom',
+                    color='black', fontsize=14)
+
+    # Save figure and data
+    os.makedirs(save_path, exist_ok=True)
+
+    output_file = os.path.join(save_path, f'figure_1c_right.{save_format}')
+    plt.savefig(output_file, format=save_format, dpi=dpi, bbox_inches='tight')
+    # plt.close()
+
+    # Save data and statistics
+    data_file = os.path.join(save_path, 'figure_1c_right_data.csv')
+    stats_file = os.path.join(save_path, 'figure_1c_right_stats.csv')
+    avg_performance.to_csv(data_file, index=False)
+    pd.DataFrame(stats).to_csv(stats_file, index=False)
+
+    print(f"Figure 1c (right) saved to: {output_file}")
+    print(f"Figure 1c (right) data saved to: {data_file}")
+    print(f"Figure 1c (right) statistics saved to: {stats_file}")
 
 
 # ============================================================================
@@ -217,4 +300,6 @@ def generate_panel(
 # ============================================================================
 
 if __name__ == '__main__':
-    generate_panel()
+    # Generate both panels
+    panel_c_left_performance_across_days()
+    panel_c_right_performance_barplot()

@@ -1,8 +1,9 @@
 """
-Figure 1d: Example behavioral performance across learning days
+Figure 1d: Day 0 performance across whisker trials
 
-This script generates Panel e for Figure 1, showing behavioral performance
-across 5 days (days -2, -1, 0, +1, +2) for two example mice (GF305 and AR180).
+This script generates Panel d for Figure 1, showing performance during
+the first learning session (day 0) aligned to whisker trial number.
+Includes raw trial outcomes and fitted learning curves with statistical testing.
 """
 
 import os
@@ -10,12 +11,14 @@ import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.colors
 import seaborn as sns
+from scipy.stats import mannwhitneyu
+from statsmodels.stats.multitest import multipletests
 
 sys.path.append('/home/aprenard/repos/fast-learning')
 import src.utils.utils_io as io
-from src.utils.utils_plot import behavior_palette
-from src.utils.utils_behavior import plot_single_session
+from src.utils.utils_plot import reward_palette
 
 
 OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_1', 'output')
@@ -26,26 +29,26 @@ OUTPUT_DIR = os.path.join(io.manuscript_output_dir, 'figure_1', 'output')
 # ============================================================================
 
 def generate_panel(
-    mouse_ids=['GF305', 'AR180'],
-    days=[-2, -1, 0, 1, 2],
-    max_trials=180,
-    table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_imagingmice_table_5days_cut.csv'),
+    table_path=os.path.join(io.processed_dir, 'behavior', 'behavior_imagingmice_table_5days_cut_with_learning_curves.csv'),
+    n_trials=120,
     save_path=OUTPUT_DIR,
     save_format='svg',
     dpi=300
 ):
     """
-    Generate Figure 1 Panel e: Behavioral performance across learning days.
+    Generate Figure 1 Panel d: Day 0 performance across whisker trials.
 
-    Shows behavioral performance across 5 days for example mice to illustrate
-    the learning trajectory. Each subplot represents one day of training.
+    Shows two subplots comparing R+ vs R- reward groups:
+    1. Raw trial outcomes (outcome_w)
+    2. Fitted learning curves (learning_curve_w)
+
+    Both panels include statistical testing (Mann-Whitney U with FDR correction)
+    displayed as grayscale rectangles at the top of each plot.
 
     Args:
-        mouse_ids: List of mouse identifiers to plot
-        days: List of day indices relative to learning day 0
-        max_trials: Maximum trial number to include per session
-        table_path: Path to CSV file containing behavioral data
-        save_path: Directory to save output figures
+        table_path: Path to CSV file containing behavioral data with learning curves
+        n_trials: Maximum number of whisker trials to include
+        save_path: Directory to save output figure and data
         save_format: Figure format ('svg', 'png', 'pdf')
         dpi: Resolution for saved figure
     """
@@ -54,61 +57,169 @@ def generate_panel(
     table_path = io.adjust_path_to_host(table_path)
     table = pd.read_csv(table_path)
 
+    # Filter for whisker trials on day 0
+    df = table.loc[(table.whisker_stim == 1) & (table.day == 0)]
+    df = df.loc[df.trial_w <= n_trials]
+
+    # Prepare data for plotting
+    df_single = df.copy()
+    df_learning = df.copy()
+
     # Set plotting theme
     sns.set_theme(
         context='paper',
         style='ticks',
         palette='deep',
         font='sans-serif',
-        font_scale=1,
-        rc={'xtick.major.width': 0.8, 'ytick.major.width': 0.8}
+        font_scale=1
     )
 
-    # Generate figure for each mouse
+    # Create two-panel figure
+    fig, axes = plt.subplots(1, 2, sharey=True, figsize=(12, 5))
+
+    # Create colormap for p-value visualization
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+        'pval_cmap', ['black', 'white']
+    )
+    norm = matplotlib.colors.Normalize(vmin=0, vmax=0.05)
+
+    # ========================================================================
+    # Panel 1: Raw trial outcomes
+    # ========================================================================
+    ax = axes[0]
+    sns.lineplot(
+        data=df_single,
+        x='trial_w',
+        y='outcome_w',
+        palette=reward_palette[::-1],
+        hue='reward_group',
+        errorbar='ci',
+        err_style='band',
+        ax=ax,
+        legend=False
+    )
+
+    # Statistical testing for each trial
+    p_values_single = []
+    for trial_w in df_single['trial_w'].unique():
+        group_R_plus = df_single[
+            (df_single['trial_w'] == trial_w) &
+            (df_single['reward_group'] == 'R+')
+        ]['outcome_w']
+        group_R_minus = df_single[
+            (df_single['trial_w'] == trial_w) &
+            (df_single['reward_group'] == 'R-')
+        ]['outcome_w']
+
+        if len(group_R_plus) > 0 and len(group_R_minus) > 0:
+            stat, p_value = mannwhitneyu(
+                group_R_plus, group_R_minus,
+                alternative='two-sided'
+            )
+            p_values_single.append((trial_w, p_value))
+
+    # FDR correction
+    trials_single, raw_pvals_single = zip(*p_values_single)
+    _, corrected_pvals_single, _, _ = multipletests(
+        raw_pvals_single, alpha=0.05, method='fdr_bh'
+    )
+    p_values_single = list(zip(trials_single, corrected_pvals_single))
+
+    # Plot p-value rectangles
+    for trial, p_value in p_values_single:
+        color = cmap(norm(min(p_value, 0.05)))
+        ax.add_patch(plt.Rectangle(
+            (trial - 0.4, 0.95), 0.8, 0.03,
+            color=color, edgecolor='none'
+        ))
+
+    ax.set_title('Raw trial outcomes')
+    ax.set_xlabel('Whisker trial')
+    ax.set_ylabel('Hit rate')
+    ax.set_ylim([-0.1, 1])
+
+    # ========================================================================
+    # Panel 2: Fitted learning curves
+    # ========================================================================
+    ax = axes[1]
+    sns.lineplot(
+        data=df_learning,
+        x='trial_w',
+        y='learning_curve_w',
+        palette=reward_palette[::-1],
+        hue='reward_group',
+        errorbar='ci',
+        err_style='band',
+        ax=ax
+    )
+
+    # Statistical testing for each trial
+    p_values_learning = []
+    for trial_w in df_learning['trial_w'].unique():
+        group_R_plus = df_learning[
+            (df_learning['trial_w'] == trial_w) &
+            (df_learning['reward_group'] == 'R+')
+        ]['learning_curve_w']
+        group_R_minus = df_learning[
+            (df_learning['trial_w'] == trial_w) &
+            (df_learning['reward_group'] == 'R-')
+        ]['learning_curve_w']
+
+        if len(group_R_plus) > 0 and len(group_R_minus) > 0:
+            stat, p_value = mannwhitneyu(
+                group_R_plus, group_R_minus,
+                alternative='two-sided'
+            )
+            p_values_learning.append((trial_w, p_value))
+
+    # FDR correction
+    trials_learning, raw_pvals_learning = zip(*p_values_learning)
+    _, corrected_pvals_learning, _, _ = multipletests(
+        raw_pvals_learning, alpha=0.05, method='fdr_bh'
+    )
+    p_values_learning = list(zip(trials_learning, corrected_pvals_learning))
+
+    # Plot p-value rectangles
+    for trial, p_value in p_values_learning:
+        color = cmap(norm(min(p_value, 0.05)))
+        ax.add_patch(plt.Rectangle(
+            (trial - 0.4, 0.95), 0.8, 0.03,
+            color=color, edgecolor='none'
+        ))
+
+    ax.set_title('Fitted learning curves')
+    ax.set_xlabel('Whisker trial')
+    ax.set_ylim([-0.1, 1])
+    ax.legend(frameon=False, title='Reward group')
+
+    sns.despine()
+    plt.tight_layout()
+
+    # Save figure and data
     os.makedirs(save_path, exist_ok=True)
 
-    for mouse_id in mouse_ids:
-        # Filter data for this mouse and days of interest
-        data = table.loc[table.mouse_id == mouse_id]
-        data = data.loc[data.day.isin(days)]
-        data = data.loc[data.trial_id <= max_trials]
+    output_file = os.path.join(save_path, f'figure_1d.{save_format}')
+    plt.savefig(output_file, format=save_format, dpi=dpi, bbox_inches='tight')
+    # plt.close()
 
-        # Get sessions for each day
-        sessions = data.session_id.drop_duplicates().to_list()
+    # Save data and statistics
+    data_file_single = os.path.join(save_path, 'figure_1d_raw_data.csv')
+    stats_file_single = os.path.join(save_path, 'figure_1d_raw_stats.csv')
+    df_single.to_csv(data_file_single, index=False)
+    pd.DataFrame(
+        p_values_single, columns=['trial_w', 'p_value']
+    ).to_csv(stats_file_single, index=False)
 
-        # Create figure with 5 subplots (one per day)
-        fig, axes = plt.subplots(1, 5, figsize=(10, 2))
+    data_file_learning = os.path.join(save_path, 'figure_1d_learning_data.csv')
+    stats_file_learning = os.path.join(save_path, 'figure_1d_learning_stats.csv')
+    df_learning.to_csv(data_file_learning, index=False)
+    pd.DataFrame(
+        p_values_learning, columns=['trial_w', 'p_value']
+    ).to_csv(stats_file_learning, index=False)
 
-        # Plot each session
-        for i, session in enumerate(sessions):
-            ax = axes[i]
-            plot_single_session(
-                data,
-                session,
-                ax=ax,
-                palette=behavior_palette,
-                do_scatter=False,
-                linewidth=1.5,
-            )
-
-        # Save figure
-        output_file = os.path.join(save_path, f'figure_1d_{mouse_id}.{save_format}')
-        plt.savefig(output_file, format=save_format, dpi=dpi, bbox_inches='tight')
-        # plt.close()
-
-        print(f"Figure 1d ({mouse_id}) saved to: {output_file}")
-
-    # Save data: behavioral table filtered for these mice and days
-    all_data = []
-    for mouse_id in mouse_ids:
-        d = table.loc[table.mouse_id == mouse_id]
-        d = d.loc[d.day.isin(days)]
-        d = d.loc[d.trial_id <= max_trials]
-        all_data.append(d)
-    pd.concat(all_data, ignore_index=True).to_csv(
-        os.path.join(save_path, 'figure_1d_data.csv'), index=False
-    )
-    print(f"Figure 1d data saved to: {os.path.join(save_path, 'figure_1d_data.csv')}")
+    print(f"Figure 1d saved to: {output_file}")
+    print(f"Figure 1d data saved to: {data_file_single} and {data_file_learning}")
+    print(f"Figure 1d statistics saved to: {stats_file_single} and {stats_file_learning}")
 
 
 # ============================================================================
