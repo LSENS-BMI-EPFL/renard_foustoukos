@@ -1,0 +1,22 @@
+# Data and outputs
+data
+results
+outputs/
+
+# Local configuration
+config.yaml
+.vscode
+.claude/
+
+# Documents
+docs
+
+# Python
+__pycache__/
+*.py[cod]
+*.cpython*
+*.egg-info/
+src.egg-info
+
+# Jupyter
+.ipynb_checkpoints/

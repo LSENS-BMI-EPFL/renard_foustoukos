@@ -1,0 +1,31 @@
+# Copy this file to config.yaml (ignored by git) and edit the paths.
+#
+# data_root: folder containing the downloaded dataset, laid out as
+#     nwb/                    NWB files
+#     metadata/sessions.csv   session metadata
+#     metadata/stop_flags/    trial selection YAML files
+#     processed/mice/         per-mouse xarray tensors
+# output_root: where derived data and figures are written.
+
+data_root: /path/to/fast-learning-data
+output_root: /path/to/fast-learning-outputs
+
+# Optional overrides, when your files are not in the default layout above:
+# nwb_dir: /path/to/nwb
+# session_metadata: /path/to/sessions.csv      # .csv or .xlsx
+# stop_flags_dir: /path/to/stop_flags
+# tensor_dir: /path/to/processed/mice
+#
+# To rebuild everything from the NWB files, pipeline step 02 writes new
+# tensors to <output_root>/processed/mice; point tensor_dir there so the
+# later steps and the figures use them:
+# tensor_dir: /path/to/fast-learning-outputs/processed/mice
+#
+# Output subfolders (defaults: <output_root>/processed, /figures, /results):
+# processed_dir: /path/to/processed
+# figures_dir: /path/to/figures
+# results_dir: /path/to/results
+
+# Figure file formats (default: pdf). PDF opens with editable text in
+# Illustrator; add svg for Inkscape.
+# figure_formats: [pdf, svg]

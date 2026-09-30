@@ -1,0 +1,13 @@
+# Conda environment for the fast-learning analysis code.
+#   conda env create -f environment.yml
+#   conda activate fast-learning
+# Dependencies are declared in pyproject.toml; exact versions used for the
+# paper are in requirements-lock.txt.
+name: fast-learning
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - -e .

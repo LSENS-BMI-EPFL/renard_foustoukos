@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the article below."
+title: "fast-learning: analysis code for Renard, Foustoukos et al. (2026)"
+type: software
+license: MIT
+repository-code: "https://github.com/LSENS-BMI-EPFL/renard_foustoukos"
+authors:
+  - family-names: Renard
+    given-names: Anthony
+  - family-names: Foustoukos
+    given-names: Georgios
+preferred-citation:
+  type: article
+  title: "Rapid cortical reorganization tracks goal-directed sensorimotor learning in real time"
+  authors:
+    - family-names: Renard
+      given-names: Anthony
+    - family-names: Foustoukos
+      given-names: Georgios
+    - family-names: Iuga
+      given-names: Maya
+    - family-names: Bech
+      given-names: Pol
+    - family-names: Bisi
+      given-names: Axel
+    - family-names: Dard
+      given-names: Robin F.
+    - family-names: Crochet
+      given-names: Sylvain
+    - family-names: Petersen
+      given-names: Carl C. H.
+  journal: eLife
+  year: 2026
+  doi: "10.7554/eLife.111818.1"
+  url: "https://elifesciences.org/reviewed-preprints/111818v1"
+  notes: "Reviewed preprint"
