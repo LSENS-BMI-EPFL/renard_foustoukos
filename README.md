@@ -16,34 +16,6 @@ Analysis code for
 It goes from the NWB files of the published dataset to every figure panel,
 with the source data and statistics of each panel.
 
----
-
-## The study
-
-Head-fixed mice learned to lick in response to a brief deflection of one
-whisker. After auditory pre-training, the whisker stimulus was introduced on
-Day 0 and kept for two more days; for one group of mice (R+) whisker licks
-were rewarded, for the other (R−) they were not. R+ mice learned within a
-single session, and inactivating the whisker primary somatosensory cortex
-(wS1) prevented this learning.
-
-The same layer 2/3 wS1 neurons were imaged with two-photon calcium imaging
-over five days (days −2 to +2; 6,056 neurons in 35 mice), including neurons
-projecting to secondary somatosensory (wS2) and motor (wM1) cortex. The
-analyses show that:
-
-- **the population response to the whisker stimulus reorganizes in R+ mice**,
-  measured per neuron by a learning modulation index (LMI) and at the
-  population level by trial-by-trial similarity, with the largest changes in
-  wS2-projecting neurons;
-- **a decoder of pre- vs post-learning activity tracks learning in real time**
-  on Day 0, in step with behaviour;
-- **the whisker-evoked ensemble reactivates spontaneously between trials**,
-  more often in R+ mice, and neurons that become more responsive during
-  learning take part in these reactivations more.
-
----
-
 ## Installation
 
 Python ≥ 3.11. With conda:

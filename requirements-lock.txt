@@ -191,4 +191,4 @@ xarray==2025.1.2
 xarray-einstats==0.8.0
 zipp==3.21.0
 cicada-analysis @ git+https://gitlab.com/cossartlab/cicada_analysis.git@ad285182ad2a93ca27ff48fd1f664bb7fd027fe3
-cicada-nwb @ git+https://gitlab.com/cossartlab/cicada_nwb.git@abfbfc0512b7b5cf621161156e57088f65eb9278
+cicada-nwb @ git+https://gitlab.com/cossartlab/cicada_nwb.git@0.3.2

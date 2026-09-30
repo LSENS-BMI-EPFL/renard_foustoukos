@@ -28,7 +28,8 @@ dependencies = [
     "openpyxl>=3.1",
     "pymc>=5.16",
     "pynwb>=2.8",
-    "cicada-nwb @ git+https://gitlab.com/cossartlab/cicada_nwb.git@abfbfc0512b7b5cf621161156e57088f65eb9278",
+    # Tag 0.3.2 (commit abfbfc0); the same URL as in cicada-analysis, which pip requires.
+    "cicada-nwb @ git+https://gitlab.com/cossartlab/cicada_nwb.git@0.3.2",
     "cicada-analysis @ git+https://gitlab.com/cossartlab/cicada_analysis.git@ad285182ad2a93ca27ff48fd1f664bb7fd027fe3",
 ]
 
@@ -37,7 +38,7 @@ dependencies = [
 preprocessing = ["suite2p", "tifffile", "scanimage-tiff-reader"]
 # Projection-neuron labelling GUI.
 gui = ["PyQt5", "pyqtgraph", "SimpleITK-SimpleElastix", "opencv-python", "scikit-image"]
-dev = ["ruff", "pytest"]
+dev = ["ruff==0.16.9", "pytest"]  # ruff pinned: its formatting rules change between versions
 
 [project.urls]
 Article = "https://doi.org/10.7554/eLife.111818.1"
