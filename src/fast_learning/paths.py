@@ -68,6 +68,10 @@ def _get(key, default):
 nwb_dir = _get('nwb_dir', _data_root / 'nwb')
 db_path = _get('session_metadata', _data_root / 'metadata' / 'sessions.csv')
 tensor_dir = _get('tensor_dir', _data_root / 'processed' / 'mice')
+# Per-trial DeepLabCut movement matrices (movement revision analysis).
+dlc_dir = _get('dlc_dir', _data_root / 'DLCTrialMatrices')
+# suite2p ops file of the example mouse of Figure 3a (for its mean image).
+fov_ops = _get('fov_ops', _data_root / 'metadata' / 'GF314_ops.npy')
 trial_indices_yaml = str(_stop_flags_dir / 'trial_indices_end_session.yaml')
 stop_flags_yaml = str(_stop_flags_dir / 'stop_flags_end_session.yaml')
 trial_indices_sensory_map_yaml = str(_stop_flags_dir / 'trial_indices_sensory_map.yaml')
@@ -77,7 +81,6 @@ stop_flags_sensory_map_yaml = str(_stop_flags_dir / 'stop_flags_sensory_map.yaml
 output_root = str(_output_root)
 processed_dir = _get('processed_dir', _output_root / 'processed')
 figures_dir = _get('figures_dir', _output_root / 'figures')
-results_dir = _get('results_dir', _output_root / 'results')
 
 # Figure file formats written by plotting.save_figure (e.g. [pdf, svg]).
 figure_formats = list(_cfg.get('figure_formats', ['pdf']))

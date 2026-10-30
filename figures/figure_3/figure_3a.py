@@ -20,7 +20,7 @@ from cicada_nwb import NWBSession
 
 from fast_learning import paths
 from fast_learning import imaging
-from fast_learning.plotting import save_figure, lmi_cmap
+from fast_learning.plotting import save_figure, lmi_cmap, panel_size
 
 
 # #############################################################################
@@ -29,8 +29,8 @@ from fast_learning.plotting import save_figure, lmi_cmap
 
 MOUSE_ID = 'GF314'
 NWB_FILE = os.path.join(paths.nwb_dir, 'GF314_28112020_171800.nwb')
-# suite2p ops file is an input stored next to the pre-refactor tensors.
-OPS_PATH = os.path.join(os.path.dirname(paths.tensor_dir), 'GF314_ops.npy')
+# suite2p ops file (mean image of the field of view); not part of the NWB file.
+OPS_PATH = paths.fov_ops
 SEGMENTATION_INFO = ['ophys', 'all_cells', 'my_plane_segmentation']
 
 sampling_rate = 30
@@ -43,7 +43,7 @@ offset_step = 400  # % dF/F vertical offset between cells
 file_name = 'tensor_xarray_mapping_data.nc'
 folder = paths.tensor_dir
 
-OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'figure_3', 'output')
+OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'Figure3')
 
 
 # #############################################################################
@@ -146,7 +146,7 @@ if __name__ == '__main__':
     # Figure layout.
     # #############################################################################
 
-    fig = plt.figure(figsize=(12, 7))
+    fig = plt.figure(figsize=panel_size(3, 2))
     gs = gridspec.GridSpec(
         1,
         3,
@@ -185,7 +185,6 @@ if __name__ == '__main__':
             cy,
             str(roi_id),
             color='white',
-            fontsize=7,
             fontweight='bold',
             ha='center',
             va='center',
@@ -206,10 +205,10 @@ if __name__ == '__main__':
     # ROI labels on y-axis
     tick_positions = [i * offset_step for i in range(len(top_cells))]
     ax_trans.set_yticks(tick_positions)
-    ax_trans.set_yticklabels(roi_labels, fontsize=7)
-    ax_trans.set_ylabel('ROI', fontsize=9)
-    ax_trans.set_xlabel('Time (s)', fontsize=9)
-    ax_trans.tick_params(axis='x', labelsize=8)
+    ax_trans.set_yticklabels(roi_labels)
+    ax_trans.set_ylabel('ROI')
+    ax_trans.set_xlabel('Time (s)')
+    ax_trans.tick_params(axis='x')
     ax_trans.spines['top'].set_visible(False)
     ax_trans.spines['right'].set_visible(False)
 

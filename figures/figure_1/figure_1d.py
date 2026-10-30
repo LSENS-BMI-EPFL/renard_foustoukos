@@ -1,225 +1,148 @@
 """
-Figure 1d: Day 0 performance across whisker trials
+Figure 1d: Day 0 performance across whisker trials, R+ vs R-
 
-This script generates Panel d for Figure 1, showing performance during
-the first learning session (day 0) aligned to whisker trial number.
-Includes raw trial outcomes and fitted learning curves with statistical testing.
+One figure, two plots, aligned on whisker trial number:
+- left: fitted learning curve (probability of licking on whisker trials);
+- right: d' across trials, Z(whisker learning curve) - Z(catch learning curve
+  interpolated onto whisker trials), from the same fits
+  (fast_learning.stats.dprime_from_rates).
+Lines: mean across mice with 95% CI. Per-trial Mann-Whitney U test R+ vs R-,
+FDR-corrected (Benjamini-Hochberg) over trials; p-values shown as a grey
+scale above the curves (white: p > 0.05), with a shared colour bar.
+
+The raw single-trial outcomes are in Figure 1—figure supplement 1d.
+
+Input: behavior_imagingmice_table_5days_cut_with_learning_curves.csv.
+Outputs: <figures_dir>/Figure1/figure_1d.pdf, figure_1d_learning_data.csv,
+figure_1d_learning_stats.csv, figure_1d_dprime_data.csv, figure_1d_dprime_stats.csv.
 """
 
 import os
-import pandas as pd
-import matplotlib.pyplot as plt
+
 import matplotlib.colors
+import matplotlib.pyplot as plt
+import pandas as pd
 import seaborn as sns
 from scipy.stats import mannwhitneyu
 from statsmodels.stats.multitest import multipletests
 
 from fast_learning import paths
-from fast_learning.plotting import reward_palette, save_figure
+from fast_learning.plotting import panel_size, reward_palette, save_figure, set_style
+from fast_learning.stats import dprime_from_rates
+
+OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'Figure1')
+TABLE_PATH = os.path.join(
+    paths.processed_dir, 'behavior', 'behavior_imagingmice_table_5days_cut_with_learning_curves.csv'
+)
+N_TRIALS = 120
+XLIM = (0, 100)  # whisker trials shown
+
+# p-value colour code: p > 0.05 white; p <= 0.05 a log10 gradient from a
+# visible grey at p = 0.05 down to black at PVALUE_FLOOR and below.
+PVALUE_FLOOR = 1e-3
+NONSIG_GREY = 0.8
+CMAP = matplotlib.colors.LinearSegmentedColormap.from_list(
+    'pval_cmap', [(0.0, 'black'), (1.0, (NONSIG_GREY,) * 3)]
+)
+CMAP.set_over('white')
+NORM = matplotlib.colors.LogNorm(vmin=PVALUE_FLOOR, vmax=0.05)
 
 
-OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'figure_1', 'output')
+def load_day0(table_path=TABLE_PATH, n_trials=N_TRIALS):
+    table = pd.read_csv(paths.adjust_path_to_host(table_path))
+    df = table.loc[(table.whisker_stim == 1) & (table.day == 0) & (table.trial_w <= n_trials)].copy()
+    df['dprime'] = dprime_from_rates(df['learning_curve_w'], df['learning_curve_chance'])
+    return df
 
 
-# ============================================================================
-# Main Panel Generation
-# ============================================================================
+def trial_pvalues(df, y):
+    """Per-trial Mann-Whitney U, R+ vs R-, FDR-corrected over trials."""
+    rows = []
+    for trial_w in sorted(df['trial_w'].unique()):
+        d = df[df['trial_w'] == trial_w]
+        rp, rm = d.loc[d.reward_group == 'R+', y], d.loc[d.reward_group == 'R-', y]
+        if len(rp) and len(rm):
+            rows.append((trial_w, mannwhitneyu(rp, rm, alternative='two-sided').pvalue))
+    trials, p = zip(*rows)
+    _, p_fdr, _, _ = multipletests(p, alpha=0.05, method='fdr_bh')
+    return pd.DataFrame({'trial_w': trials, 'p_value_raw': p, 'p_value': p_fdr})
 
 
-def generate_panel(
-    table_path=os.path.join(
-        paths.processed_dir, 'behavior', 'behavior_imagingmice_table_5days_cut_with_learning_curves.csv'
-    ),
-    n_trials=120,
-    save_path=OUTPUT_DIR,
-    save_format='svg',
-    dpi=300,
-):
-    """
-    Generate Figure 1 Panel d: Day 0 performance across whisker trials.
-
-    Shows two subplots comparing R+ vs R- reward groups:
-    1. Raw trial outcomes (outcome_w)
-    2. Fitted learning curves (learning_curve_w)
-
-    Both panels include statistical testing (Mann-Whitney U with FDR correction)
-    displayed as grayscale rectangles at the top of each plot.
-
-    Args:
-        table_path: Path to CSV file containing behavioral data with learning curves
-        n_trials: Maximum number of whisker trials to include
-        save_path: Directory to save output figure and data
-        save_format: Figure format ('svg', 'png', 'pdf')
-        dpi: Resolution for saved figure
-    """
-
-    # Load behavioral data
-    table_path = paths.adjust_path_to_host(table_path)
-    table = pd.read_csv(table_path)
-
-    # Filter for whisker trials on day 0
-    df = table.loc[(table.whisker_stim == 1) & (table.day == 0)]
-    df = df.loc[df.trial_w <= n_trials]
-
-    # Prepare data for plotting
-    df_single = df.copy()
-    df_learning = df.copy()
-
-    # Set plotting theme
-    sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1)
-
-    # Create two-panel figure
-    fig, axes = plt.subplots(1, 2, sharey=True, figsize=(12, 5))
-
-    # p > 0.05 (not significant) is left pure white. p <= 0.05 uses a log10
-    # gradient from a visible grey right at the p=0.05 boundary down to
-    # black as p keeps shrinking. A linear scale collapses almost all
-    # significant p-values (which routinely span many orders of magnitude,
-    # e.g. 0.04 down to 1e-8) into indistinguishable black; log gives each
-    # order of magnitude equal visual weight instead. PVALUE_FLOOR is the
-    # p-value at which the gradient bottoms out at pure black -- tune it to
-    # the actual range of p-values in the data (anything smaller renders
-    # identically black).
-    PVALUE_FLOOR = 1e-3
-    NONSIG_GREY = 0.8  # grey at p=0.05
-    cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
-        'pval_cmap', [(0.0, 'black'), (1.0, (NONSIG_GREY,) * 3)]
-    )
-    cmap.set_over('white')  # p > vmax (0.05) -- not part of the gradient
-    norm = matplotlib.colors.LogNorm(vmin=PVALUE_FLOOR, vmax=0.05)
-
-    # ========================================================================
-    # Panel 1: Raw trial outcomes
-    # ========================================================================
-    ax = axes[0]
+def curve_panel(ax, df, y, stats, ylabel, ylim, legend=False, zero_line=False):
     sns.lineplot(
-        data=df_single,
+        data=df,
         x='trial_w',
-        y='outcome_w',
-        palette=reward_palette[::-1],
+        y=y,
         hue='reward_group',
+        hue_order=['R+', 'R-'],
+        palette=reward_palette[::-1],
         errorbar='ci',
         err_style='band',
+        legend=legend,
         ax=ax,
-        legend=False,
+        seed=0,
+    )
+    height = 0.03 * (ylim[1] - ylim[0])
+    for trial, p in zip(stats['trial_w'], stats['p_value']):
+        ax.add_patch(
+            plt.Rectangle(
+                (trial - 0.4, ylim[1] - 1.5 * height),
+                0.8,
+                height,
+                facecolor=CMAP(NORM(max(p, PVALUE_FLOOR))),
+                edgecolor='none',
+            )
+        )
+    if zero_line:
+        ax.axhline(0, color='grey', linestyle='--', linewidth=0.6)
+    ax.set_ylim(*ylim)
+    ax.set_xlim(*XLIM)
+    ax.set_xlabel('Whisker trial')
+    ax.set_ylabel(ylabel)
+    if legend:
+        ax.legend(frameon=False, title='', loc='lower left')
+
+
+def generate_figure(save_path=OUTPUT_DIR):
+    df = load_day0()
+    learning_stats = trial_pvalues(df, 'learning_curve_w')
+    dprime_stats = trial_pvalues(df, 'dprime')
+
+    set_style()
+    fig, axes = plt.subplots(1, 2, figsize=panel_size(2, w=1.2))
+    fig.subplots_adjust(wspace=0.45)
+    curve_panel(axes[0], df, 'learning_curve_w', learning_stats, 'Lick probability', (-0.1, 1))
+    curve_panel(
+        axes[1], df, 'dprime', dprime_stats, "d' (whisker vs catch)", (-1, 3), legend=True, zero_line=True
     )
 
-    # Statistical testing for each trial
-    p_values_single = []
-    for trial_w in df_single['trial_w'].unique():
-        group_R_plus = df_single[(df_single['trial_w'] == trial_w) & (df_single['reward_group'] == 'R+')][
-            'outcome_w'
-        ]
-        group_R_minus = df_single[(df_single['trial_w'] == trial_w) & (df_single['reward_group'] == 'R-')][
-            'outcome_w'
-        ]
-
-        if len(group_R_plus) > 0 and len(group_R_minus) > 0:
-            stat, p_value = mannwhitneyu(group_R_plus, group_R_minus, alternative='two-sided')
-            p_values_single.append((trial_w, p_value))
-
-    # FDR correction
-    trials_single, raw_pvals_single = zip(*p_values_single)
-    _, corrected_pvals_single, _, _ = multipletests(raw_pvals_single, alpha=0.05, method='fdr_bh')
-    p_values_single = list(zip(trials_single, corrected_pvals_single))
-
-    # Plot p-value rectangles
-    for trial, p_value in p_values_single:
-        color = cmap(norm(max(p_value, PVALUE_FLOOR)))
-        ax.add_patch(plt.Rectangle((trial - 0.4, 0.95), 0.8, 0.03, color=color, edgecolor='none'))
-
-    ax.set_title('Raw trial outcomes')
-    ax.set_xlabel('Whisker trial')
-    ax.set_ylabel('Hit rate')
-    ax.set_ylim([-0.1, 1])
-
-    # ========================================================================
-    # Panel 2: Fitted learning curves
-    # ========================================================================
-    ax = axes[1]
-    sns.lineplot(
-        data=df_learning,
-        x='trial_w',
-        y='learning_curve_w',
-        palette=reward_palette[::-1],
-        hue='reward_group',
-        errorbar='ci',
-        err_style='band',
-        ax=ax,
-    )
-
-    # Statistical testing for each trial
-    p_values_learning = []
-    for trial_w in df_learning['trial_w'].unique():
-        group_R_plus = df_learning[
-            (df_learning['trial_w'] == trial_w) & (df_learning['reward_group'] == 'R+')
-        ]['learning_curve_w']
-        group_R_minus = df_learning[
-            (df_learning['trial_w'] == trial_w) & (df_learning['reward_group'] == 'R-')
-        ]['learning_curve_w']
-
-        if len(group_R_plus) > 0 and len(group_R_minus) > 0:
-            stat, p_value = mannwhitneyu(group_R_plus, group_R_minus, alternative='two-sided')
-            p_values_learning.append((trial_w, p_value))
-
-    # FDR correction
-    trials_learning, raw_pvals_learning = zip(*p_values_learning)
-    _, corrected_pvals_learning, _, _ = multipletests(raw_pvals_learning, alpha=0.05, method='fdr_bh')
-    p_values_learning = list(zip(trials_learning, corrected_pvals_learning))
-
-    # Plot p-value rectangles
-    for trial, p_value in p_values_learning:
-        color = cmap(norm(max(p_value, PVALUE_FLOOR)))
-        ax.add_patch(plt.Rectangle((trial - 0.4, 0.95), 0.8, 0.03, color=color, edgecolor='none'))
-
-    ax.set_title('Fitted learning curves')
-    ax.set_xlabel('Whisker trial')
-    ax.set_ylim([-0.1, 1])
-    ax.legend(frameon=False, title='Reward group')
-
-    # Shared colorbar for the p-value color code (same cmap/norm as the
-    # significance rectangles above; p > 0.05 renders white in the actual
-    # rectangles via cmap.set_over(), but isn't depicted on the bar itself
-    # -- no extend cap). Reversed so the most significant (blackest) end
-    # is on top and the p=0.05 boundary is at the bottom.
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm = plt.cm.ScalarMappable(norm=NORM, cmap=CMAP)
     sm.set_array([])
     cbar = fig.colorbar(sm, ax=axes, orientation='vertical', shrink=0.6, pad=0.02, aspect=15)
-    tick_vals = [PVALUE_FLOOR, 1e-2, 0.05]
-    cbar.set_ticks(tick_vals)
-    cbar.set_ticklabels(['≤ {:.0e}'.format(PVALUE_FLOOR), '0.01', '0.05'])
-    cbar.set_label('p-value (FDR-corrected)', fontsize=9)
+    cbar.set_ticks([PVALUE_FLOOR, 1e-2, 0.05])
+    cbar.set_ticklabels([f'≤ {PVALUE_FLOOR:.0e}', '0.01', '0.05'])
+    cbar.set_label('p-value (FDR-corrected)')
     cbar.ax.invert_yaxis()
-
     sns.despine()
-    plt.tight_layout()
 
-    # Save figure and data
     os.makedirs(save_path, exist_ok=True)
+    save_figure(fig, os.path.join(save_path, 'figure_1d.pdf'))
+    plt.close(fig)
+    cols = ['mouse_id', 'session_id', 'reward_group', 'trial_w']
+    df[cols + ['learning_curve_w']].to_csv(
+        os.path.join(save_path, 'figure_1d_learning_data.csv'), index=False
+    )
+    learning_stats.to_csv(os.path.join(save_path, 'figure_1d_learning_stats.csv'), index=False)
+    df[cols + ['learning_curve_w', 'learning_curve_chance', 'dprime']].to_csv(
+        os.path.join(save_path, 'figure_1d_dprime_data.csv'), index=False
+    )
+    dprime_stats.to_csv(os.path.join(save_path, 'figure_1d_dprime_stats.csv'), index=False)
+    for name, s in [('learning curve', learning_stats), ("d'", dprime_stats)]:
+        sig = s.loc[s['p_value'] <= 0.05, 'trial_w']
+        print(
+            f"{name}: first FDR-significant trial {sig.min() if len(sig) else None}, {len(sig)} of {len(s)} trials"
+        )
 
-    output_file = os.path.join(save_path, f'figure_1d.{save_format}')
-    save_figure(plt.gcf(), output_file)
-    # plt.close()
-
-    # Save data and statistics
-    data_file_single = os.path.join(save_path, 'figure_1d_raw_data.csv')
-    stats_file_single = os.path.join(save_path, 'figure_1d_raw_stats.csv')
-    df_single.to_csv(data_file_single, index=False)
-    pd.DataFrame(p_values_single, columns=['trial_w', 'p_value']).to_csv(stats_file_single, index=False)
-
-    data_file_learning = os.path.join(save_path, 'figure_1d_learning_data.csv')
-    stats_file_learning = os.path.join(save_path, 'figure_1d_learning_stats.csv')
-    df_learning.to_csv(data_file_learning, index=False)
-    pd.DataFrame(p_values_learning, columns=['trial_w', 'p_value']).to_csv(stats_file_learning, index=False)
-
-    print(f"Figure 1d saved to: {output_file}")
-    print(f"Figure 1d data saved to: {data_file_single} and {data_file_learning}")
-    print(f"Figure 1d statistics saved to: {stats_file_single} and {stats_file_learning}")
-
-
-# ============================================================================
-# Main execution
-# ============================================================================
 
 if __name__ == '__main__':
-    generate_panel()
+    generate_figure()

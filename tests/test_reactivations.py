@@ -81,3 +81,17 @@ def test_mouse_selection():
     assert not sel.loc['B', 'included']  # no day-0 events
     assert not sel.loc['D', 'included'] and sel.loc['D', 'n_events_day0'] == 0  # day 0 missing
     assert list(sel['reward_group']) == ['R+', 'R+', 'R-', 'R-']
+
+
+def test_detect_events_per_trial_ignores_trial_junctions():
+    T = 60
+    # Two trials: the first ends high, the second starts low then has one real peak.
+    trial1 = np.linspace(0.0, 0.9, T)
+    trial2 = np.zeros(T)
+    trial2[27:34] = [0.1, 0.3, 0.6, 0.9, 0.6, 0.3, 0.1]
+    corr = np.r_[trial1, trial2]
+    kwargs = dict(threshold=0.5, min_distance=rx.MIN_EVENT_DISTANCE_FRAMES, prominence=rx.PROMINENCE)
+    concatenated = rx.detect_reactivation_events(corr, **kwargs)
+    per_trial = rx.detect_reactivation_events(corr, n_timepoints=T, **kwargs)
+    assert any(abs(e - T) <= 2 for e in concatenated)  # artefact at the junction
+    np.testing.assert_array_equal(per_trial, [T + 30])  # only the real peak

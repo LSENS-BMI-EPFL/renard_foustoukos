@@ -16,7 +16,7 @@ three questions:
 Built entirely as post-processing on already-computed results -- no new
 template-matching or event detection:
   - reactivation_results_p99.pkl (original all-no-stim-trials variant,
-    same as used for the Figure 4H shuffle-template control) already
+    same as used for the Figure 6C shuffle-template control) already
     stores, per mouse per day, the detected event indices and the
     no-stim-only trial data they came from (with trial_id as a
     coordinate), so per-trial event counts are a direct re-aggregation

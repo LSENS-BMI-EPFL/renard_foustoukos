@@ -26,7 +26,7 @@ import xarray as xr
 from fast_learning import paths, database
 from cicada_nwb import NWBSession
 from fast_learning import imaging
-from fast_learning.tensors import make_events_aligned_array_3d
+from fast_learning.tensors import make_events_aligned_array_3d, time_axis
 from fast_learning.behavior import make_behavior_table
 
 
@@ -84,7 +84,7 @@ for mouse in mice_list:
         # Parameters for tensor array.
         cell_types = ['na', 'wM1', 'wS2']
         rrs_keys = ['ophys', 'fluorescence_all_cells', 'dff']
-        time_range = (2, 7)
+        time_range = (1, 6)  # seconds before and after the stimulus
         epoch_name = None
         trial_selection = None
 
@@ -114,18 +114,11 @@ for mouse in mice_list:
         metadatas.append(metadata)
         kept_trial_ids.append(pd.DataFrame({'session_id': session_id, 'trial_id': metadata['trials']}))
 
-    # Sessions are concatenated on the trial dim. Different sessions can
-    # yield a slightly different number of timepoints (per-session sampling
-    # rate jitter rounds differently in align_array_to_timestamps), so
-    # truncate all sessions to the shortest common time length first.
-    n_t_per_session = [d.shape[2] for d in data]
-    min_n_t = min(n_t_per_session)
-    if len(set(n_t_per_session)) > 1:
-        print(
-            f'  Truncating sessions to common length: {min_n_t} timepoints '
-            f'(session lengths: {n_t_per_session})'
-        )
-        data = [d[:, :, :min_n_t] for d in data]
+    # Sessions are concatenated on the trial dim; all have the same window
+    # (fixed frame rate), with the stimulus at the same frame.
+    n_t_per_session = {d.shape[2] for d in data}
+    if len(n_t_per_session) > 1:
+        raise ValueError(f'{mouse}: sessions have different window lengths {n_t_per_session}.')
     tensor = np.concatenate(data, axis=1)
     kept_trial_ids = pd.concat(kept_trial_ids, ignore_index=True)
 
@@ -145,7 +138,7 @@ for mouse in mice_list:
     behav_table = behav_table.set_index(['session_id', 'trial_id'])
     behav_table = behav_table.loc[list(kept_trial_ids.itertuples(index=False, name=None))].reset_index()
 
-    time = np.linspace(-time_range[0], time_range[1], tensor.shape[2])
+    time = time_axis(time_range)
     # Create xarray.
     ds = xr.DataArray(
         tensor,
@@ -217,7 +210,8 @@ for mouse in mice_list:
         # Parameters for tensor array.
         cell_types = ['na', 'wM1', 'wS2']
         rrs_keys = ['ophys', 'fluorescence_all_cells', 'dff']
-        time_range = (2, 7)
+        # From 2 s before the stimulus.
+        time_range = (2, 6)  # seconds before and after the stimulus
         epoch_name = None
         trial_selection = None
 
@@ -250,21 +244,14 @@ for mouse in mice_list:
             _, d = nwb_session.petersen.get_bhv_type_and_training_day_index()
         behavior_days.extend([d for _ in range(traces.shape[1])])
 
-    # Sessions are concatenated on the trial dim. Different sessions can
-    # yield a slightly different number of timepoints (per-session sampling
-    # rate jitter rounds differently in align_array_to_timestamps), so
-    # truncate all sessions to the shortest common time length first.
-    n_t_per_session = [d.shape[2] for d in data]
-    min_n_t = min(n_t_per_session)
-    if len(set(n_t_per_session)) > 1:
-        print(
-            f'  Truncating sessions to common length: {min_n_t} timepoints '
-            f'(session lengths: {n_t_per_session})'
-        )
-        data = [d[:, :, :min_n_t] for d in data]
+    # Sessions are concatenated on the trial dim; all have the same window
+    # (fixed frame rate), with the stimulus at the same frame.
+    n_t_per_session = {d.shape[2] for d in data}
+    if len(n_t_per_session) > 1:
+        raise ValueError(f'{mouse}: sessions have different window lengths {n_t_per_session}.')
     tensor = np.concatenate(data, axis=1)
 
-    time = np.linspace(-time_range[0], time_range[1], tensor.shape[2])
+    time = time_axis(time_range)
     # Create xarray.
     ds = xr.DataArray(
         tensor,
@@ -295,9 +282,7 @@ trial_indices_sensory_map_yaml = paths.trial_indices_sensory_map_yaml
 stop_flag_sensory_map_yaml = paths.stop_flags_sensory_map_yaml
 processed_data_dir = paths.processed_dir
 days = ['-2', '-1', '0', '+1', '+2']
-sampling_rate = 30  # Hz, for imaging data.
-baseline_win = (0, 1)
-baseline_win = (int(baseline_win[0] * sampling_rate), int(baseline_win[1] * sampling_rate))
+
 
 _, nwb_list, mice_list, _ = database.select_sessions_from_db(
     db_path,
@@ -315,7 +300,7 @@ for mouse_id in mice_list:
     file_name = 'tensor_xarray_learning_data.nc'
     folder = os.path.join(paths.processed_dir, 'mice')
     xarr = imaging.load_mouse_xarray(mouse_id, folder, file_name, subtracted=False)
-    xarr = imaging.subtract_baseline(xarr, 2, baseline_win)
+    xarr = imaging.subtract_baseline(xarr, 2, imaging.baseline_frames(xarr))
 
     # Save the xarray.
     save_path = os.path.join(folder, mouse_id, 'tensor_xarray_learning_data_baselinesubstracted.nc')
@@ -325,7 +310,7 @@ for mouse_id in mice_list:
     folder = os.path.join(paths.processed_dir, 'mice')
 
     xarr = imaging.load_mouse_xarray(mouse_id, folder, file_name, subtracted=False)
-    xarr = imaging.subtract_baseline(xarr, 2, baseline_win)
+    xarr = imaging.subtract_baseline(xarr, 2, imaging.baseline_frames(xarr))
     # Save the xarray.
     save_path = os.path.join(folder, mouse_id, 'tensor_xarray_mapping_data_baselinesubstracted.nc')
     xarr.to_netcdf(save_path)

@@ -7,7 +7,29 @@ unmaintained) NWB_analysis package (analysis.psth_analysis.make_events_aligned_a
 import numpy as np
 
 from cicada_nwb import NWBSession
-from cicada_analysis.cicada_tools.core import align_array_to_timestamps, filter_events_based_on_epochs
+from cicada_analysis.cicada_tools.core import (
+    align_array_to_events,
+    filter_events_based_on_epochs,
+    find_nearest,
+)
+
+# Nominal frame rate of all recordings (imaging_rate in the NWB files). Event
+# windows are converted to frames with it, rather than with each session's
+# median frame interval: the AR sessions' timestamps are quantised to 0.2 ms,
+# so that median is 33.2 or 33.4 ms (30.12 or 29.94 Hz) at random, which put
+# the stimulus one frame apart between sessions.
+FRAME_RATE = 30.0
+
+
+def window_frames(time_range):
+    """(frames before, frames after) the stimulus for time_range = (s before, s after)."""
+    return int(round(time_range[0] * FRAME_RATE)), int(round(time_range[1] * FRAME_RATE))
+
+
+def time_axis(time_range):
+    """Time of each frame (s) relative to the stimulus frame, which is at exactly 0."""
+    n_pre, n_post = window_frames(time_range)
+    return np.arange(-n_pre, n_post + 1) / FRAME_RATE
 
 
 def _select_events(session, trial_selection, epoch_name, trial_idx):
@@ -69,12 +91,15 @@ def make_events_aligned_array_3d(
         if not cell_type_dict:
             cell_type_dict = {'na': np.arange(activity.shape[0])}
 
+        # Stimulus frame of each event: the frame nearest to it in time.
+        event_frames = [find_nearest(activity_ts, t) for t in events]
+
         ct_arrays = []
         for cell_type in cell_types:
             if cell_type in cell_type_dict:
                 rois = cell_type_dict[cell_type]
-                activity_aligned = align_array_to_timestamps(
-                    activity[rois], events, activity_ts, window_s=time_range
+                activity_aligned = align_array_to_events(
+                    activity[rois], event_frames, window_frames(time_range)
                 )
                 ct_arrays.append(activity_aligned)
                 metadata['mice'].extend([mouse_id] * activity_aligned.shape[0])

@@ -23,11 +23,6 @@ def load_mouse_xarray(mouse_id, dir_path, file_name, subtracted=True):
     if subtracted:
         file_name = file_name.replace('.nc', '_baselinesubstracted.nc')
     array_path = os.path.join(dir_path, mouse_id, file_name)
-    # Check if file exists locally to speed up loading.
-    # local_path = array_path.replace('/mnt/lsens-analysis/Anthony_Renard/data_processed', '/raid0/anthony/data_processed')
-    # if os.path.exists(local_path):
-    #     array_path = local_path
-    # # Load the xarray dataset.
     print(f'Loading {array_path}')
     data = xr.open_dataarray(array_path, lock=False)
 
@@ -42,6 +37,58 @@ def load_mouse_xarray(mouse_id, dir_path, file_name, subtracted=True):
     data.close()
 
     return data
+
+
+BASELINE_WIN_S = (-1, 0)  # seconds relative to stimulus onset
+
+
+# Tolerance for comparing frame times (multiples of 1/30 s) with window edges.
+_TIME_EPS = 1e-6
+
+
+def _in_window(t, start, stop):
+    """Half-open window start <= t < stop, so a frame on an edge (e.g. the
+    stimulus frame at t = 0) belongs to one window only."""
+    return (t >= start - _TIME_EPS) & (t < stop - _TIME_EPS)
+
+
+def select_time(xarr, start, stop):
+    """Frames of an xarray with start <= time < stop (seconds).
+
+    Raises if the window extends beyond the tensor's time axis, so that a
+    window is never silently shortened.
+    """
+    t = xarr['time'].values
+    frame = np.median(np.diff(t)) if len(t) > 1 else 0
+    if start < t[0] - _TIME_EPS or stop > t[-1] + frame + _TIME_EPS:
+        raise ValueError(
+            f'Time window ({start}, {stop}) s extends beyond the tensor ({t[0]:.2f} to {t[-1]:.2f} s).'
+        )
+    return xarr.isel(time=np.flatnonzero(_in_window(t, start, stop)))
+
+
+N_PASSIVE_TRIALS = 40  # last passive (mapping) trials of each day used in all analyses
+
+
+def last_trials(xarr, n=N_PASSIVE_TRIALS):
+    """The last n trials of each day (all of them if fewer), in their order."""
+    days = xarr['day'].values
+    keep = np.zeros(len(days), bool)
+    for d in np.unique(days):
+        keep[np.flatnonzero(days == d)[-n:]] = True
+    return xarr.isel(trial=np.flatnonzero(keep))
+
+
+def baseline_frames(xarr, win=BASELINE_WIN_S):
+    """Frame range (start, stop) of a baseline window given in seconds, from
+    the time coordinate of an xarray; independent of where the tensor starts."""
+    t = xarr['time'].values
+    idx = np.flatnonzero(_in_window(t, win[0], win[1]))
+    if len(idx) == 0:
+        raise ValueError(
+            f'Baseline window {win} s is outside the tensor time axis ({t[0]:.2f} to {t[-1]:.2f} s).'
+        )
+    return idx[0], idx[-1] + 1
 
 
 def subtract_baseline(arr, time_axis, baseline_win):

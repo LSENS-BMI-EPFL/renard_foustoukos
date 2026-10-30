@@ -50,3 +50,49 @@ def test_filter_data_by_cell_count():
     data = pd.DataFrame({'mouse_id': ['A'] * 3 + ['B'] * 2, 'cell_type': ['wS2'] * 5, 'roi': [1, 2, 3, 1, 2]})
     out = imaging.filter_data_by_cell_count(data, min_cells=3)
     assert set(out['mouse_id']) == {'A'}
+
+
+def test_baseline_frames_follow_the_time_axis():
+    import xarray as xr
+
+    for start in (-1, -2):
+        n = int((6 - start) * 30) + 1
+        x = xr.DataArray(
+            np.zeros((1, 1, n)), dims=['cell', 'trial', 'time'], coords={'time': np.linspace(start, 6, n)}
+        )
+        i0, i1 = imaging.baseline_frames(x)
+        t = x.time.values
+        assert t[i0] == -1 and t[i1 - 1] < 0 <= t[i1]  # -1 to 0 s whatever the tensor start
+        assert i1 - i0 == 30
+
+
+def test_time_axis_puts_the_stimulus_at_zero():
+    from fast_learning import tensors
+
+    assert tensors.window_frames((1, 6)) == (30, 180)
+    t = tensors.time_axis((2, 6))
+    assert len(t) == 60 + 180 + 1 and t[60] == 0 and t[0] == -2 and np.isclose(t[-1], 6)
+
+
+def test_select_time_is_half_open():
+    import xarray as xr
+    from fast_learning import tensors
+
+    t = tensors.time_axis((1, 6))
+    x = xr.DataArray(np.arange(len(t)), dims=['time'], coords={'time': t})
+    resp = imaging.select_time(x, 0, 0.3)
+    base = imaging.select_time(x, -1, 0)
+    assert len(resp) == 9 and resp.time.values[0] == 0  # stimulus frame to +267 ms
+    assert len(base) == 30 and base.time.values[-1] < 0  # stimulus frame excluded
+
+
+def test_select_time_refuses_windows_beyond_the_tensor():
+    import pytest
+    import xarray as xr
+    from fast_learning import tensors
+
+    t = tensors.time_axis((1, 6))
+    x = xr.DataArray(np.arange(len(t)), dims=['time'], coords={'time': t})
+    with pytest.raises(ValueError):
+        imaging.select_time(x, -2, 0)
+    assert len(imaging.select_time(x, -1, 1)) == 60

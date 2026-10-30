@@ -13,22 +13,19 @@ from matplotlib.gridspec import GridSpec
 
 from fast_learning import paths
 from fast_learning import imaging
-from fast_learning.plotting import save_figure
+from fast_learning.plotting import save_figure, panel_size
 
 
 # #############################################################################
 # Parameters.
 # #############################################################################
 
-sampling_rate = 30
 win_sec = (-0.5, 1.5)
-baseline_win = (0, 1)
 if __name__ == '__main__':
-    baseline_win = (int(baseline_win[0] * sampling_rate), int(baseline_win[1] * sampling_rate))
     days = [-2, -1, 0, 1, 2]
     days_str = ['Day -2', 'Day -1', 'Day 0', 'Day +1', 'Day +2']
 
-    OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'figure_3', 'output')
+    OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'Figure3')
 
     # #############################################################################
     # Load LMI data.
@@ -61,10 +58,10 @@ if __name__ == '__main__':
     file_name = 'tensor_xarray_mapping_data.nc'
     folder = paths.tensor_dir
     xarr = imaging.load_mouse_xarray(session_mouse_id, folder, file_name)
-    xarr = imaging.subtract_baseline(xarr, 2, baseline_win)
+    xarr = imaging.subtract_baseline(xarr, 2, imaging.baseline_frames(xarr))
 
     xarr = xarr.sel(trial=xarr['day'].isin(days))
-    xarr = xarr.sel(time=slice(win_sec[0], win_sec[1]))
+    xarr = imaging.select_time(xarr, win_sec[0], win_sec[1])
     xarr = xarr.groupby('day').mean(dim='trial')
 
     xarr.name = 'psth'
@@ -101,7 +98,7 @@ if __name__ == '__main__':
     session_vmin = 0
 
     # Create figure
-    fig = plt.figure(figsize=(7.5, 4))
+    fig = plt.figure(figsize=panel_size(5, w=0.7, h=1.2))
     gs = GridSpec(1, 6, width_ratios=[1, 1, 1, 1, 1, 0.08], wspace=0.08)
 
     axes = [fig.add_subplot(gs[0, i]) for i in range(5)]
@@ -122,26 +119,25 @@ if __name__ == '__main__':
         )
 
         # Add stimulus onset line
-        ax.axvline(0, color='#FF9600', linestyle='-', linewidth=1.2)
+        ax.axvline(0, color='#FF9600', linestyle='-', linewidth=1)
 
         # Title
-        ax.set_title(days_str[i], fontsize=10)
+        ax.set_title(days_str[i])
 
         # X-axis
         if i == 2:
-            ax.set_xlabel('Time (s)', fontsize=9)
+            ax.set_xlabel('Time (s)')
         ax.set_xticks([-0.5, 0, 0.5, 1, 1.5])
-        ax.tick_params(axis='x', labelsize=8)
+        ax.tick_params(axis='x')
 
         # Y-axis
         if i == 0:
-            ax.set_ylabel('Cells (by LMI)', fontsize=9)
+            ax.set_ylabel('Cells (by LMI)')
         ax.set_yticks([])
 
     # Add colorbar
     cbar = fig.colorbar(im, cax=cbar_ax)
-    cbar.set_label('DF/F0 (%)', fontsize=9)
-    cbar.ax.tick_params(labelsize=8)
+    cbar.set_label('DF/F0 (%)')
 
     plt.tight_layout()
 

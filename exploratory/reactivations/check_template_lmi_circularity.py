@@ -47,7 +47,7 @@ r_minus_mice = [m for m in _mice if _groups[m] == 'R-']
 DAYS_TO_CHECK = [-2, -1, 0, 1, 2]
 LMI_RESULTS_CSV = os.path.join(paths.processed_dir, 'lmi_results.csv')
 FOLDER = paths.tensor_dir
-OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'figure_4', 'diagnostics')
+OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'Figure6', 'diagnostics')
 
 
 def _significance_stars(p):

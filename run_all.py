@@ -12,7 +12,7 @@ its output goes to <output_root>/logs/<step>.log. Paths come from config.yaml
 Examples:
     python run_all.py --list                    # show the steps
     python run_all.py --stage figures           # all figures from processed data
-    python run_all.py --only figure_4 supp_4    # one or more figure folders
+    python run_all.py --only figure_6 figure_6_supfig_1    # one or more figure folders
     python run_all.py --stage pipeline --from 06_decoder
     python run_all.py --stage all --skip 04_learning_curves
 """
@@ -39,23 +39,46 @@ PIPELINE = [
     ('06_decoder', 'pipeline/06_decoder.py', [], True),
     ('07_reactivations', 'pipeline/07_reactivations.py', [], True),
     ('07_reactivations_nolick', 'pipeline/07_reactivations.py', ['--nolick'], True),
+    # Held-out cells (main analysis), all cells (comparison), no-lick control.
     ('08_participation', 'pipeline/08_participation.py', [], True),
-    ('09_pairwise_correlations', 'pipeline/09_pairwise_correlations.py', [], True),
+    ('08_participation_allcells', 'pipeline/08_participation.py', ['--cells', 'all'], True),
+    ('08_participation_nolick', 'pipeline/08_participation.py', ['--nolick'], True),
 ]
 
 FIGURE_DIRS = [
     'figure_1',
-    'supp_1',
+    'figure_1_supfig_1',
     'figure_2',
+    'figure_2_supfig_1',
+    'figure_2_supfig_2',
+    'figure_2_supfig_3',
     'figure_3',
-    'supp_2',
-    'supp_3',
+    'figure_3_supfig_1',
+    'figure_3_supfig_2',
+    'figure_3_supfig_3',
+    'figure_3_supfig_4',
     'figure_4',
-    'supp_4',
-    'revisions',
+    'figure_4_supfig_1',
+    'figure_5',
+    'figure_5_supfig_1',
+    'figure_5_supfig_2',
+    'figure_6',
+    'figure_6_supfig_1',
+    'figure_6_supfig_2',
+    'figure_6_supfig_3',
 ]
+# Figure scripts that also run as variants (name suffix, extra arguments): the
+# no-lick reactivation control (-1 to +1 s) and participation of all cells /
+# in-sample cells, compared with held-out cells (main analysis).
+_NOLICK = ('nolick', ['--nolick'])
+_ALLCELLS = ('allcells', ['--cells', 'all'])
+FIGURE_VARIANTS = {
+    'figure_6c': [_NOLICK],
+    'figure_6d_e': [_ALLCELLS, ('insample', ['--cells', 'insample']), _NOLICK],
+    'figure6_supfig1_a_b': [_ALLCELLS, ('insample', ['--cells', 'insample']), _NOLICK],
+}
 # Revision analyses with a slow computation of their own; --recompute forces it.
-RECOMPUTE = {'figure_3f_LMIshuffles', 'figure_4h_shuffle_control'}
+RECOMPUTE = {'figure3_supfig1_c', 'figure6_supfig2_c', 'figure6_supfig3_a_c'}
 
 
 def figure_steps():
@@ -63,6 +86,8 @@ def figure_steps():
     for d in FIGURE_DIRS:
         for script in sorted((REPO / 'figures' / d).glob('*.py')):
             steps.append((script.stem, str(script.relative_to(REPO)), [], True, d))
+            for sfx, extra in FIGURE_VARIANTS.get(script.stem, []):
+                steps.append((f'{script.stem}_{sfx}', str(script.relative_to(REPO)), extra, True, d))
     return steps
 
 

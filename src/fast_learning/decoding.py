@@ -3,9 +3,10 @@
 Each mouse's population response to a passive whisker stimulus is the mean
 baseline-subtracted dF/F of every cell over WIN after stimulus onset, for the
 last N_MAP_TRIALS mapping trials of each day. A logistic-regression decoder
-trained on days -2/-1 vs +1/+2 separates pre- from post-learning responses;
+trained on days -2/-1 vs +1/+2 separates pre- from post-learning responses
+(Day-0 active whisker trials are projected onto it with ACTIVE_WIN, 0-180 ms);
 pipeline/06_decoder.py trains it once per mouse and saves the weights, which
-Fig. 4b-c, Supp. 2c, Supp. 3k-l and the d-prime revision reuse.
+Fig. 5f-g, Fig. 5—supp. 1a, Fig. 4—supp. 1b and the d-prime revision reuse.
 """
 
 import os
@@ -24,7 +25,11 @@ from fast_learning import imaging, paths, database
 # ============================================================================
 
 SAMPLING_RATE = 30
-WIN = (0, 0.300)
+WIN = (0, 0.300)  # passive mapping trials: decoder training
+# Day-0 active whisker trials projected onto the decoder axis: a shorter window
+# that ends before most licks (whisker reaction times ~350-500 ms), so that
+# lick-related activity cannot drive the projection.
+ACTIVE_WIN = (0, 0.180)
 BASELINE_WIN = (-1, 0)
 DAYS = [-2, -1, 0, 1, 2]
 N_MAP_TRIALS = 40
@@ -76,7 +81,7 @@ def load_and_process_data(
         xarray = imaging.load_mouse_xarray(mouse, folder, 'tensor_xarray_mapping_data.nc')
         # Manual baseline subtraction
         xarray = xarray - np.nanmean(
-            xarray.sel(time=slice(BASELINE_WIN[0], BASELINE_WIN[1])).values, axis=2, keepdims=True
+            imaging.select_time(xarray, BASELINE_WIN[0], BASELINE_WIN[1]).values, axis=2, keepdims=True
         )
         rew_gp = database.get_mouse_reward_group_from_db(paths.db_path, mouse, db)
 
@@ -98,7 +103,7 @@ def load_and_process_data(
             continue
 
         d = xarray.groupby('day').apply(lambda x: x.isel(trial=slice(-N_MAP_TRIALS, None)))
-        d = d.sel(time=slice(WIN[0], WIN[1])).mean(dim='time')
+        d = imaging.select_time(d, WIN[0], WIN[1]).mean(dim='time')
         d = d.fillna(0)
 
         if rew_gp == 'R-':
@@ -207,6 +212,46 @@ def train_and_save_decoder_weights(
     print(f'Classifier weights CSV saved: {csv_path}')
 
     return weights
+
+
+def reference_projections(weights, pre_days=(-2, -1), post_days=(1, 2), n_splits=10, seed=0):
+    """Projection of the passive pre and post trials that train each mouse's
+    decoder, as references for the Day-0 projection: each trial is projected
+    by a decoder trained (as train_and_save_decoder_weights, on WIN) on the
+    other folds of a stratified n_splits-fold split, so that, like the Day-0
+    trials, it is new to the decoder; its response is averaged over
+    ACTIVE_WIN, the window of the Day-0 projection.
+
+    Returns one row per mouse: mouse_id, reward_group, pre, post (mean
+    decision value of the pre and of the post trials, sign as the Day-0
+    projection).
+    """
+    from sklearn.base import clone
+    from sklearn.model_selection import StratifiedKFold
+
+    rows = []
+    for mouse, w in weights.items():
+        x = imaging.load_mouse_xarray(mouse, paths.tensor_dir, 'tensor_xarray_mapping_data.nc')
+        x = x - np.nanmean(imaging.select_time(x, *BASELINE_WIN).values, axis=2, keepdims=True)
+        x = imaging.last_trials(x.sel(trial=x['day'].isin(list(pre_days) + list(post_days))), N_MAP_TRIALS)
+        x = x.sel(cell=x['roi'].isin(w['roi']))
+        is_post = np.isin(x['day'].values, post_days)
+        X_train = imaging.select_time(x, *WIN).mean(dim='time').fillna(0).values.T
+        X_proj = imaging.select_time(x, *ACTIVE_WIN).mean(dim='time').fillna(0).values.T
+        dv = np.empty(len(is_post))
+        for train, test in StratifiedKFold(n_splits, shuffle=True, random_state=seed).split(X_train, is_post):
+            scaler = clone(w['scaler']).fit(X_train[train])
+            clf = clone(w['clf']).fit(scaler.transform(X_train[train]), is_post[train])
+            dv[test] = clf.decision_function(scaler.transform(X_proj[test])) * w['sign_flip']
+        rows.append(
+            dict(
+                mouse_id=mouse,
+                reward_group=w['reward_group'],
+                pre=dv[~is_post].mean(),
+                post=dv[is_post].mean(),
+            )
+        )
+    return pd.DataFrame(rows)
 
 
 def load_decoder_weights(path=DECODER_WEIGHTS_PKL):

@@ -18,12 +18,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import mannwhitneyu
-from statsmodels.formula.api import ols
-from statsmodels.stats.anova import anova_lm
 
 from fast_learning import imaging
 from fast_learning import paths, database
-from fast_learning.plotting import reward_palette, save_figure
+from fast_learning.plotting import reward_palette, save_figure, set_style, panel_size
 from fast_learning.similarity import (
     WIN,
     DAYS,
@@ -33,13 +31,14 @@ from fast_learning.similarity import (
     compute_reorganization_metrics,
 )
 from fast_learning.stats import significance_stars as _significance_stars
+from fast_learning.stats import format_p
 
 
 # ============================================================================
 # Parameters
 # ============================================================================
 
-OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'figure_3', 'output')
+OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'Figure3')
 
 
 # ============================================================================
@@ -116,7 +115,7 @@ def load_and_process_data(
 
         # Select last N_MAP_TRIALS mapping trials per day and average over time window
         d = xarray.groupby('day').apply(lambda x: x.isel(trial=slice(-N_MAP_TRIALS, None)))
-        d = d.sel(time=slice(WIN[0], WIN[1])).mean(dim='time')
+        d = imaging.select_time(d, WIN[0], WIN[1]).mean(dim='time')
 
         # Optionally z-score within each day to remove recording drift
         if zscore:
@@ -180,7 +179,7 @@ def panel_h_correlation_matrices(
             projection_type=projection_type,
         )
 
-    sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1)
+    set_style()
 
     avg_corr_rew = np.nanmean(corr_matrices_rew, axis=0)
     avg_corr_nonrew = np.nanmean(corr_matrices_nonrew, axis=0)
@@ -188,19 +187,16 @@ def panel_h_correlation_matrices(
     vmax = np.nanpercentile(avg_corr_rew, 99)
     vmin = 0
 
-    fig = plt.figure(figsize=(16, 6))
-    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 0.05], wspace=0.25)
-    ax0 = fig.add_subplot(gs[0, 0])
-    ax1 = fig.add_subplot(gs[0, 1])
-    ax_cbar = fig.add_subplot(gs[0, 2])
+    # Square matrices (equal aspect), colour bar the height of the matrices.
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=panel_size(2, h=1.1), layout='constrained')
 
     edges = np.cumsum([N_MAP_TRIALS] * len(DAYS))
 
     # R+ group
-    ax0.imshow(avg_corr_rew, cmap='viridis', vmax=vmax, vmin=vmin, aspect='auto')
+    ax0.imshow(avg_corr_rew, cmap='viridis', vmax=vmax, vmin=vmin, aspect='equal')
     for edge in edges[:-1] - 0.5:
-        ax0.axvline(x=edge, color='white', linestyle='-', linewidth=1.5)
-        ax0.axhline(y=edge, color='white', linestyle='-', linewidth=1.5)
+        ax0.axvline(x=edge, color='white', linestyle='-', linewidth=1)
+        ax0.axhline(y=edge, color='white', linestyle='-', linewidth=1)
     ax0.set_xticks(edges - N_MAP_TRIALS / 2)
     ax0.set_xticklabels(DAYS)
     ax0.set_yticks(edges - N_MAP_TRIALS / 2)
@@ -210,10 +206,10 @@ def panel_h_correlation_matrices(
     ax0.set_title(f'R+ Group (N={len(mice_rew)} mice)')
 
     # R- group
-    im1 = ax1.imshow(avg_corr_nonrew, cmap='viridis', vmax=vmax, vmin=vmin, aspect='auto')
+    im1 = ax1.imshow(avg_corr_nonrew, cmap='viridis', vmax=vmax, vmin=vmin, aspect='equal')
     for edge in edges[:-1] - 0.5:
-        ax1.axvline(x=edge, color='white', linestyle='-', linewidth=1.5)
-        ax1.axhline(y=edge, color='white', linestyle='-', linewidth=1.5)
+        ax1.axvline(x=edge, color='white', linestyle='-', linewidth=1)
+        ax1.axhline(y=edge, color='white', linestyle='-', linewidth=1)
     ax1.set_xticks(edges - N_MAP_TRIALS / 2)
     ax1.set_xticklabels(DAYS)
     ax1.set_yticks(edges - N_MAP_TRIALS / 2)
@@ -226,9 +222,8 @@ def panel_h_correlation_matrices(
         'spearman': 'Spearman Correlation',
         'cosine': 'Cosine Similarity',
     }[similarity_metric]
-    cbar = fig.colorbar(im1, cax=ax_cbar, label=metric_label)
-    cbar.set_ticks([vmin, vmax])
-    plt.tight_layout()
+    cbar = fig.colorbar(im1, ax=[ax0, ax1], label=metric_label, shrink=0.8, aspect=15)
+    cbar.set_ticks([vmin, vmax], labels=[f'{vmin:.2f}', f'{vmax:.2f}'])
 
     # Save figure
     os.makedirs(output_dir, exist_ok=True)
@@ -289,7 +284,7 @@ def panel_i_within_day_correlations(
 
     Saves:
         figure_3i_data.csv: per-mouse within-day correlations for each day
-        figure_3i_stats.csv: 2-way ANOVA (day x reward_group) + Mann-Whitney U post-hoc per day
+        figure_3i_stats.csv: Mann-Whitney U (R+ vs R-) per day
     """
     if corr_matrices_rew is None or corr_matrices_nonrew is None:
         corr_matrices_rew, corr_matrices_nonrew, mice_rew, mice_nonrew = load_and_process_data(
@@ -299,13 +294,13 @@ def panel_i_within_day_correlations(
             projection_type=projection_type,
         )
 
-    sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1)
+    set_style()
 
     metrics_rew = compute_within_day_metrics(corr_matrices_rew, mice_rew, 'R+')
     metrics_nonrew = compute_within_day_metrics(corr_matrices_nonrew, mice_nonrew, 'R-')
     metrics_combined = pd.concat([metrics_rew, metrics_nonrew], ignore_index=True)
 
-    # Reshape to long format for ANOVA
+    # Long format for plotting
     day_cols = [f'within_day{d:+d}' for d in DAYS]
     long_df = metrics_combined.melt(
         id_vars=['mouse_id', 'reward_group'],
@@ -316,23 +311,8 @@ def panel_i_within_day_correlations(
     long_df['day'] = long_df['day_label'].str.extract(r'day([+-]?\d+)').astype(int)
     long_df['day_label'] = pd.Categorical(long_df['day_label'], categories=day_cols, ordered=True)
 
-    # Statistics: 2-way ANOVA (day x reward_group)
-    model = ols('correlation ~ C(reward_group) * C(day)', data=long_df).fit()
-    anova_table = anova_lm(model, typ=2)
-    anova_rows = []
-    for term, row in anova_table.iterrows():
-        anova_rows.append(
-            {
-                'test': '2-way ANOVA',
-                'term': term,
-                'F': row.get('F', np.nan),
-                'p_value': row['PR(>F)'],
-                'significance': _significance_stars(row['PR(>F)']) if not np.isnan(row['PR(>F)']) else '',
-            }
-        )
-
-    # Post-hoc: Mann-Whitney U between groups for each day (no correction)
-    stats_rows = anova_rows
+    # Mann-Whitney U between groups for each day (one value per mouse, no correction)
+    stats_rows = []
     stats_dict = {}
     for day in DAYS:
         col = f'within_day{day:+d}'
@@ -350,7 +330,7 @@ def panel_i_within_day_correlations(
             }
         )
 
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+    fig, ax = plt.subplots(1, 1, figsize=panel_size())
 
     sns.pointplot(
         data=long_df,
@@ -362,8 +342,9 @@ def panel_i_within_day_correlations(
         errorbar='ci',
         markers='o',
         linestyles='-',
-        markersize=8,
-        linewidth=2,
+        markersize=4,
+        linewidth=1,
+        seed=0,
     )
 
     for mouse_id in metrics_combined['mouse_id'].unique():
@@ -384,10 +365,9 @@ def panel_i_within_day_correlations(
         ax.text(
             DAYS.index(day),
             ylim_top * 0.95,
-            _significance_stars(stats_dict[day]),
+            format_p(stats_dict[day]),
             ha='center',
             va='bottom',
-            fontsize=9,
         )
 
     ax.set_ylim(0, ylim_top)
@@ -447,7 +427,7 @@ def panel_j_reorganization_index(
             projection_type=projection_type,
         )
 
-    sns.set_theme(context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1)
+    set_style()
 
     metrics_rew = compute_reorganization_metrics(corr_matrices_rew, mice_rew, 'R+')
     metrics_nonrew = compute_reorganization_metrics(corr_matrices_nonrew, mice_nonrew, 'R-')
@@ -472,7 +452,7 @@ def panel_j_reorganization_index(
     long_df = metrics_combined[['mouse_id', 'reward_group', 'reorganization_index']].copy()
     long_df['metric'] = 'reorganization_index'
 
-    fig, ax = plt.subplots(1, 1, figsize=(4, 5))
+    fig, ax = plt.subplots(1, 1, figsize=panel_size(w=0.7))
 
     sns.barplot(
         data=long_df,
@@ -482,6 +462,7 @@ def panel_j_reorganization_index(
         palette=reward_palette[::-1],
         ax=ax,
         errorbar='ci',
+        seed=0,
     )
     sns.swarmplot(
         data=long_df,
@@ -490,14 +471,14 @@ def panel_j_reorganization_index(
         hue='reward_group',
         dodge=True,
         ax=ax,
-        size=4,
+        size=2,
         color='grey',
         legend=False,
     )
 
     ylim_top = 0.3 if similarity_metric in ('pearson', 'cosine') else 0.15
     p_text = 'p<0.001' if p < 0.001 else f'p={p:.3f}' if p < 0.01 else f'p={p:.2f}'
-    ax.text(0, ylim_top * 0.95, p_text, ha='center', va='bottom', fontsize=9)
+    ax.text(0, ylim_top * 0.95, p_text, ha='center', va='bottom')
 
     ax.set_ylim(0, ylim_top)
     ax.set_xlabel('')

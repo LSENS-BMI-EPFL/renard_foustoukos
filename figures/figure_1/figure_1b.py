@@ -8,14 +8,13 @@ across 5 days (days -2, -1, 0, +1, +2) for two example mice (GF305 and AR180).
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 from fast_learning import paths
-from fast_learning.plotting import behavior_palette, save_figure
+from fast_learning.plotting import behavior_palette, save_figure, set_style, panel_size
 from fast_learning.behavior import plot_single_session
 
 
-OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'figure_1', 'output')
+OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'Figure1')
 
 
 # ============================================================================
@@ -53,14 +52,7 @@ def generate_panel(
     table = pd.read_csv(table_path)
 
     # Set plotting theme
-    sns.set_theme(
-        context='paper',
-        style='ticks',
-        palette='deep',
-        font='sans-serif',
-        font_scale=1,
-        rc={'xtick.major.width': 0.8, 'ytick.major.width': 0.8},
-    )
+    set_style()
 
     # Generate figure for each mouse
     os.makedirs(save_path, exist_ok=True)
@@ -75,7 +67,7 @@ def generate_panel(
         sessions = data.session_id.drop_duplicates().to_list()
 
         # Create figure with 5 subplots (one per day)
-        fig, axes = plt.subplots(1, 5, figsize=(10, 2))
+        fig, axes = plt.subplots(1, 5, figsize=panel_size(5, w=0.7, h=0.8))
 
         # Plot each session
         for i, session in enumerate(sessions):
@@ -86,7 +78,7 @@ def generate_panel(
                 ax=ax,
                 palette=behavior_palette,
                 do_scatter=False,
-                linewidth=1.5,
+                linewidth=1,
             )
 
         # Save figure

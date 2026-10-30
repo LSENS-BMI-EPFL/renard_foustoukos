@@ -6,8 +6,8 @@ Participation rates are computed per reactivation event, so a mouse with
 almost no events on day 0 has undefined or unreliable day-0 rates (with one
 event, every cell's rate is exactly 0 or 1). Mice with fewer than
 MIN_DAY0_EVENTS events on day 0, at the main detection threshold, are
-therefore excluded from every participation analysis (Fig. 4i-j, Supp. 4a-c
-and their revisions). Event-rate analyses (Fig. 4h and its controls) keep all
+therefore excluded from every participation analysis (Fig. 6d-e, its
+supplement 1 and their revisions). Event-rate analyses (Fig. 6c and its controls) keep all
 mice: there, zero events is a valid measurement, and excluding mice on it
 would select on the outcome.
 
@@ -24,7 +24,8 @@ Reactivation detection
 ----------------------
 A whisker template (mean day-specific response of each cell to the last
 N_MAP_TRIALS passive whisker stimuli, 0-300 ms) is correlated frame by frame
-with population activity during no-stim trials. Reactivation events are peaks
+with population activity during correct-rejection no-stim trials (no
+stimulus, no lick in the response window; whole trial, -1 to 6 s). Reactivation events are peaks
 of the smoothed correlation above a per-mouse threshold, set from circular-shift
 surrogates of the pre-learning days (see compute_surrogate_thresholds). The
 reactivation pipeline step runs detection for all mice.
@@ -68,6 +69,24 @@ MIN_EVENTS_PER_DAY = MIN_DAY0_EVENTS
 SELECTION_DAY = 0
 MOUSE_SELECTION_CSV = os.path.join(paths.processed_dir, 'reactivation', 'mouse_selection.csv')
 
+RESULTS_DIR = os.path.join(paths.processed_dir, 'reactivation')
+
+# No-lick control: the same trials restricted to -1 to +1 s around no-stim
+# onset, the part of the trial in which correct-rejection trials have no lick
+# (no-lick period before onset, response window 0-1 s). Results in
+# RESULTS_DIR/nolick (pipeline steps 07 and 08 with --nolick).
+NOLICK_WINDOW = (-1, 1)
+
+
+def results_dir(nolick=False):
+    """Folder of the reactivation results (main analysis or no-lick control)."""
+    return os.path.join(RESULTS_DIR, 'nolick') if nolick else RESULTS_DIR
+
+
+def trial_window(nolick=False):
+    """Time window (s) of the trials used, None for the whole trial."""
+    return NOLICK_WINDOW if nolick else None
+
 
 # ============================================================================
 # Helpers
@@ -100,7 +119,7 @@ def create_whisker_template(mouse, day, threshold_dff=THRESHOLD_DFF, verbose=Fal
     xarray_day = xarray_map.sel(trial=xarray_map['day'] == day)
     xarray_day = xarray_day.groupby('day').apply(lambda x: x.isel(trial=slice(-N_MAP_TRIALS, None)))
 
-    d = xarray_day.sel(time=slice(WIN[0], WIN[1])).mean(dim='time').fillna(0)
+    d = imaging.select_time(xarray_day, WIN[0], WIN[1]).mean(dim='time').fillna(0)
     template = d.mean(dim='trial').values
 
     if threshold_dff is None:
@@ -130,35 +149,68 @@ def compute_template_correlation(data, template):
     return correlations
 
 
-def select_trials_by_type(xarray_day, no_lick_only=False, time_window=None):
-    """Select no-stim trials, optionally restricted to no-lick (correct
-    rejection) trials and/or a time window around no-stim onset."""
-    mask = xarray_day['no_stim'] == 1
-    if no_lick_only:
-        mask = mask & (xarray_day['lick_flag'] == 0)
-    selected = xarray_day.sel(trial=mask)
-    if time_window is not None:
-        selected = selected.sel(time=slice(time_window[0], time_window[1]))
+def select_trials_by_type(xarray_day, window=None):
+    """Correct-rejection trials of one day: no-stim trials without a lick in
+    the response window, whole trial (-1 to 6 s around no-stim onset).
+
+    Mice do not lick before onset (no-lick period) nor in the 0-1 s response
+    window of these trials; licks after 1 s are possible and are checked not
+    to drive events (figures/figure_6_supfig_2/figure6_supfig2_a.py). window
+    (start, stop) in s restricts the frames (no-lick control: NOLICK_WINDOW).
+    Returns (trials, number of trials)."""
+    selected = xarray_day.sel(trial=(xarray_day['no_stim'] == 1) & (xarray_day['lick_flag'] == 0))
+    if window is not None:
+        selected = imaging.select_time(selected, *window)
     return selected, len(selected.trial)
 
 
-def load_selected_trials(mouse, day, no_lick_only=False, time_window=None, folder=None):
-    """No-stim trials of one mouse-day (raw dF/F, cells x trials x time), as
-    used for reactivation detection. Event indices of a reactivation results
-    file refer to these trials' concatenated trial x time axis, so pass the
-    no_lick_only / time_window of that file (its 'parameters' entry)."""
+def load_selected_trials(mouse, day, folder=None, window=None):
+    """Correct-rejection trials of one mouse-day (raw dF/F, cells x trials x
+    time), as used for reactivation detection. Event indices of a reactivation
+    results file refer to these trials' concatenated trial x time axis, so
+    pass the window of that file (its 'parameters' entry)."""
     xarray_learning = imaging.load_mouse_xarray(
         mouse, folder or paths.tensor_dir, 'tensor_xarray_learning_data.nc', subtracted=False
     )
     xarray_day = xarray_learning.sel(trial=xarray_learning['day'] == day)
-    selected, _ = select_trials_by_type(xarray_day, no_lick_only=no_lick_only, time_window=time_window)
+    selected, _ = select_trials_by_type(xarray_day, window)
     return selected
 
 
 def detect_reactivation_events(
-    correlations, threshold, min_distance, prominence, smooth=True, window_length=5, polyorder=2
+    correlations,
+    threshold,
+    min_distance,
+    prominence,
+    smooth=True,
+    window_length=5,
+    polyorder=2,
+    n_timepoints=None,
 ):
-    """Detect reactivation events as peaks in correlation timeseries."""
+    """Detect reactivation events as peaks in a template-correlation time series.
+
+    correlations: one value per frame. When it holds several trials put end to
+    end, pass n_timepoints (frames per trial): smoothing, peak finding and
+    peak prominence are then computed within each trial, since consecutive
+    trials are not contiguous in time. Run on the concatenated series, the
+    jump between the end of one trial and the start of the next creates
+    spurious peaks at the trial edges (directly, and through the smoothing
+    overshoot), and a peak's prominence can be measured against a neighbouring
+    trial.
+
+    Returns the frame indices of the events in `correlations`.
+    """
+    if n_timepoints is not None:
+        per_trial = np.asarray(correlations).reshape(-1, n_timepoints)
+        peaks = [
+            i * n_timepoints
+            + detect_reactivation_events(
+                trial, threshold, min_distance, prominence, smooth, window_length, polyorder
+            )
+            for i, trial in enumerate(per_trial)
+        ]
+        return np.concatenate(peaks).astype(int) if peaks else np.array([], dtype=int)
+
     if smooth:
         if window_length % 2 == 0:
             window_length += 1
@@ -331,9 +383,7 @@ def get_threshold_for_mouse_day(threshold_dict, mouse, day, default_threshold=TH
 # ============================================================================
 
 
-def analyze_mouse_reactivation(
-    mouse, days=DAYS, verbose=False, threshold_dict=None, no_lick_only=False, time_window=None
-):
+def analyze_mouse_reactivation(mouse, days=DAYS, verbose=False, threshold_dict=None, window=None):
     """
     Detect reactivation events for a single mouse across all days.
 
@@ -348,9 +398,7 @@ def analyze_mouse_reactivation(
         try:
             template, cells_mask = create_whisker_template(mouse, day, THRESHOLD_DFF, verbose=verbose)
 
-            selected_trials = load_selected_trials(
-                mouse, day, no_lick_only=no_lick_only, time_window=time_window, folder=folder
-            )
+            selected_trials = load_selected_trials(mouse, day, folder=folder, window=window)
             n_selected_trials = len(selected_trials.trial)
             if n_selected_trials == 0:
                 continue
@@ -362,7 +410,11 @@ def analyze_mouse_reactivation(
 
             current_threshold = get_threshold_for_mouse_day(threshold_dict, mouse, day, THRESHOLD_CORR)
             events = detect_reactivation_events(
-                correlations, current_threshold, MIN_EVENT_DISTANCE_FRAMES, PROMINENCE
+                correlations,
+                current_threshold,
+                MIN_EVENT_DISTANCE_FRAMES,
+                PROMINENCE,
+                n_timepoints=n_timepoints,
             )
 
             pct_above, n_above, total_frames = compute_time_above_threshold(correlations, current_threshold)
@@ -489,8 +541,7 @@ def analyze_surrogates_per_day(
     n_surrogates=1000,
     percentiles=(99,),
     verbose=False,
-    no_lick_only=False,
-    time_window=None,
+    window=None,
 ):
     """
     Compute per-day surrogate thresholds for one mouse.
@@ -511,9 +562,7 @@ def analyze_surrogates_per_day(
                 mouse, folder, 'tensor_xarray_learning_data.nc', subtracted=False
             )
             xarray_day = xarray_learning.sel(trial=xarray_learning['day'] == day)
-            nostim, n_trials = select_trials_by_type(
-                xarray_day, no_lick_only=no_lick_only, time_window=time_window
-            )
+            nostim, n_trials = select_trials_by_type(xarray_day, window)
             if n_trials < 5:
                 continue
 
@@ -565,8 +614,7 @@ def process_mouse_surrogates_per_day(
     n_surrogates,
     percentiles=(99,),
     verbose=False,
-    no_lick_only=False,
-    time_window=None,
+    window=None,
 ):
     """Parallel wrapper for per-day surrogates."""
     results_dfs, surrogate_data = analyze_surrogates_per_day(
@@ -576,8 +624,7 @@ def process_mouse_surrogates_per_day(
         n_surrogates=n_surrogates,
         percentiles=percentiles,
         verbose=verbose,
-        no_lick_only=no_lick_only,
-        time_window=time_window,
+        window=window,
     )
     return (mouse, results_dfs, surrogate_data)
 
@@ -588,8 +635,7 @@ def analyze_surrogates_per_mouse(
     n_surrogates=1000,
     percentiles=(99,),
     verbose=False,
-    no_lick_only=False,
-    time_window=None,
+    window=None,
 ):
     """
     Compute single per-mouse surrogate threshold using pre-learning days pooled.
@@ -618,9 +664,7 @@ def analyze_surrogates_per_mouse(
                 continue
 
             xarray_day = xarray_learning.sel(trial=xarray_learning['day'] == day)
-            nostim, n_nostim_trials = select_trials_by_type(
-                xarray_day, no_lick_only=no_lick_only, time_window=time_window
-            )
+            nostim, n_nostim_trials = select_trials_by_type(xarray_day, window)
             if n_nostim_trials < 5:
                 continue
 
@@ -687,7 +731,7 @@ def analyze_surrogates_per_mouse(
 
 
 def process_mouse_surrogates_per_mouse(
-    mouse, threshold_dff, n_surrogates, percentiles=(99,), verbose=False, no_lick_only=False, time_window=None
+    mouse, threshold_dff, n_surrogates, percentiles=(99,), verbose=False, window=None
 ):
     """Parallel wrapper for per-mouse surrogates."""
     results_dfs, surrogate_data = analyze_surrogates_per_mouse(
@@ -696,8 +740,7 @@ def process_mouse_surrogates_per_mouse(
         n_surrogates=n_surrogates,
         percentiles=percentiles,
         verbose=verbose,
-        no_lick_only=no_lick_only,
-        time_window=time_window,
+        window=window,
     )
     return (mouse, results_dfs, surrogate_data)
 

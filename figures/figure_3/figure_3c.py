@@ -14,22 +14,19 @@ import seaborn as sns
 
 from fast_learning import imaging
 from fast_learning import paths, database
-from fast_learning.plotting import reward_palette, save_figure
+from fast_learning.plotting import reward_palette, save_figure, set_style, panel_size
 
 
 # ============================================================================
 # Parameters
 # ============================================================================
 
-SAMPLING_RATE = 30
 WIN_SEC = (-0.5, 1.5)
-BASELINE_WIN = (0, 1)
 if __name__ == '__main__':
-    BASELINE_WIN = (int(BASELINE_WIN[0] * SAMPLING_RATE), int(BASELINE_WIN[1] * SAMPLING_RATE))
     DAYS = [-2, -1, 0, 1, 2]
     MIN_CELLS = 3
 
-    OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'figure_3', 'output')
+    OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'Figure3')
 
     # ============================================================================
     # Load and process imaging data
@@ -44,9 +41,9 @@ if __name__ == '__main__':
         reward_group = database.get_mouse_reward_group_from_db(paths.db_path, mouse_id)
         folder = paths.tensor_dir
         xarr = imaging.load_mouse_xarray(mouse_id, folder, 'tensor_xarray_mapping_data.nc')
-        xarr = imaging.subtract_baseline(xarr, 2, BASELINE_WIN)
+        xarr = imaging.subtract_baseline(xarr, 2, imaging.baseline_frames(xarr))
         xarr = xarr.sel(trial=xarr['day'].isin(DAYS))
-        xarr = xarr.sel(time=slice(WIN_SEC[0], WIN_SEC[1]))
+        xarr = imaging.select_time(xarr, WIN_SEC[0], WIN_SEC[1])
         xarr = xarr.groupby('day').mean(dim='trial')
 
         xarr.name = 'psth'
@@ -71,15 +68,9 @@ if __name__ == '__main__':
     # Figure
     # ============================================================================
 
-    sns.set_theme(
-        context='paper',
-        style='ticks',
-        font='sans-serif',
-        font_scale=1,
-        rc={'pdf.fonttype': 42, 'ps.fonttype': 42, 'svg.fonttype': 'none'},
-    )
+    set_style()
 
-    fig, axes = plt.subplots(1, len(DAYS), figsize=(18, 4), sharey=True)
+    fig, axes = plt.subplots(1, len(DAYS), figsize=panel_size(len(DAYS), w=0.7), sharey=True)
 
     for j, day in enumerate(DAYS):
         d = data[data['day'] == day]
@@ -94,6 +85,7 @@ if __name__ == '__main__':
             estimator='mean',
             ax=axes[j],
             legend=False,
+            seed=0,
         )
         axes[j].axvline(0, color='#FF9600', linestyle='-')
         axes[j].set_title(f'Day {day:+d}')

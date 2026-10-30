@@ -18,7 +18,7 @@ from fast_learning import paths
 from fast_learning.plotting import stim_palette
 
 
-OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'figure_1', 'output')
+OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'Figure1')
 
 
 # ============================================================================

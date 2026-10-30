@@ -1,11 +1,12 @@
 """
 Figure 3f, g: Learning Modulation Index (LMI) for all cells.
 
-  Panel f: Distribution of LMI values (R+ vs R-, KS test)
+  Panel f: Distribution of LMI values (R+ vs R-)
   Panel g: Proportion of cells with significant positive/negative LMI (R+ vs R-)
 
-Statistics: KS test (R+ vs R-) for distributions.
-            Mann-Whitney U test (R+ vs R-) for proportions.
+Statistics: f: KS distance between pooled cells, with a permutation p-value that
+            respects mice (whole mice reassigned to R+/R-, 10,000 shuffles).
+            g: Mann-Whitney U test (R+ vs R-, one proportion per mouse).
 """
 
 import os
@@ -14,11 +15,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from scipy.stats import mannwhitneyu, ks_2samp
+from scipy.stats import mannwhitneyu
 
 from fast_learning import paths, database
-from fast_learning.plotting import reward_palette, save_figure
-from fast_learning.stats import significance_stars as get_star
+from fast_learning.plotting import reward_palette, save_figure, set_style, panel_size
+from fast_learning.stats import format_p, ks_permutation_test
 
 
 # ============================================================================
@@ -27,7 +28,7 @@ from fast_learning.stats import significance_stars as get_star
 
 LMI_POS_THRESHOLD = 0.975
 LMI_NEG_THRESHOLD = 0.025
-OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'figure_3', 'output')
+OUTPUT_DIR = os.path.join(paths.manuscript_output_dir, 'Figure3')
 
 
 if __name__ == '__main__':
@@ -63,11 +64,10 @@ if __name__ == '__main__':
     # Statistics
     # ============================================================================
 
-    # KS test: R+ vs R- on LMI distribution
-    rp_lmi = lmi_df[lmi_df['reward_group'] == 'R+']['lmi'].values
-    rm_lmi = lmi_df[lmi_df['reward_group'] == 'R-']['lmi'].values
-    ks_stat, ks_p = ks_2samp(rp_lmi, rm_lmi, alternative='two-sided')
-    print(f"LMI distribution KS: D={ks_stat:.3f}, p={ks_p:.4f}")
+    # KS distance R+ vs R-, permutation p-value with whole mice reassigned.
+    ks = ks_permutation_test(lmi_df, 'lmi', 'reward_group', ('R+', 'R-'), shuffle='between_mice')
+    ks_stat, ks_p = ks['ks_statistic'], ks['p_value']
+    print(f"LMI distribution KS: D={ks_stat:.3f}, permutation p={ks_p:.4f}")
 
     # Mann-Whitney U: R+ vs R- on proportions
     stats_rows = []
@@ -78,21 +78,23 @@ if __name__ == '__main__':
         stats_rows.append({'lmi_sign': sign, 'test': 'Mann-Whitney U', 'statistic': stat, 'p_value': p})
         print(f"{sign}: U={stat:.3f}, p={p:.4f}")
 
+    stats_rows.append(
+        {
+            'lmi_sign': 'all (distribution)',
+            'test': 'KS, permutation across mice',
+            'statistic': ks_stat,
+            'p_value': ks_p,
+        }
+    )
     stats_df = pd.DataFrame(stats_rows)
 
     # ============================================================================
     # Figure f: LMI distribution
     # ============================================================================
 
-    sns.set_theme(
-        context='paper',
-        style='ticks',
-        font='sans-serif',
-        font_scale=1,
-        rc={'pdf.fonttype': 42, 'ps.fonttype': 42, 'svg.fonttype': 'none'},
-    )
+    set_style()
 
-    fig_f, ax_f = plt.subplots(1, 1, figsize=(4, 4))
+    fig_f, ax_f = plt.subplots(1, 1, figsize=panel_size())
 
     bin_edges = np.linspace(-1, 1, 31)
     for rg, color in zip(['R-', 'R+'], reward_palette):
@@ -107,7 +109,7 @@ if __name__ == '__main__':
             ax=ax_f,
         )
 
-    ax_f.text(0.98, 0.98, get_star(ks_p), ha='right', va='top', fontsize=10, transform=ax_f.transAxes)
+    ax_f.text(0.98, 0.98, f'KS {format_p(ks_p)}', ha='right', va='top', transform=ax_f.transAxes)
     ax_f.set_xlim(-1, 1)
     ax_f.set_xlabel('LMI')
     ax_f.set_ylabel('Probability')
@@ -119,7 +121,7 @@ if __name__ == '__main__':
     # Figure g: proportion bar plots
     # ============================================================================
 
-    fig_g, axes_g = plt.subplots(1, 2, figsize=(5, 4), sharey=True)
+    fig_g, axes_g = plt.subplots(1, 2, figsize=panel_size(2, w=0.7), sharey=True)
 
     for ax, sign, title in [
         (axes_g[0], 'lmi_pos', 'Positive LMI'),
@@ -135,9 +137,10 @@ if __name__ == '__main__':
             palette=reward_palette,
             legend=False,
             ax=ax,
+            seed=0,
         )
         sns.swarmplot(
-            data=lmi_prop, x='reward_group', order=['R+', 'R-'], y=sign, color='k', size=4, alpha=0.7, ax=ax
+            data=lmi_prop, x='reward_group', order=['R+', 'R-'], y=sign, color='k', size=2, alpha=0.7, ax=ax
         )
         ax.set_title(title)
         ax.set_xlabel('')
@@ -145,14 +148,12 @@ if __name__ == '__main__':
 
         stat_row = stats_df[stats_df['lmi_sign'] == sign]
         if not stat_row.empty:
-            star = get_star(stat_row.iloc[0]['p_value'])
             ax.annotate(
-                star,
+                format_p(stat_row.iloc[0]['p_value']),
                 xy=(0.5, 0.95),
                 xycoords='axes fraction',
                 ha='center',
                 va='top',
-                fontsize=14,
                 color='black',
             )
 

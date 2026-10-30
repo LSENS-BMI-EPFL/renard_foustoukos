@@ -2,7 +2,8 @@
 
 ROC analysis of each cell's mean response (0-300 ms, baseline-subtracted)
 to passive whisker mapping trials of days -2/-1 vs days +1/+2 (day 0 is not
-used): LMI = 2 * (AUC - 0.5), from -1 to +1. Significance from 1000 label
+used), using the last 40 passive trials of each day (all of them if fewer),
+as the other analyses of passive responses: LMI = 2 * (AUC - 0.5), from -1 to +1. Significance from 1000 label
 shuffles: lmi_p >= 0.975 is LMI+, <= 0.025 is LMI-.
 
 Inputs:  mapping tensors (tensor_dir), session metadata.
@@ -71,13 +72,14 @@ for mouse_id in mice_list:
         mouse_id, paths.tensor_dir, 'tensor_xarray_mapping_data.nc', subtracted=False
     )
     data_mapping = data_mapping - np.nanmean(
-        data_mapping.sel(time=slice(*baseline_win)), axis=2, keepdims=True
+        imaging.select_time(data_mapping, *baseline_win), axis=2, keepdims=True
     )
+    data_mapping = imaging.last_trials(data_mapping)
 
     data_pre = data_mapping.sel(trial=data_mapping.coords['day'].isin([-2, -1]))
-    data_pre = data_pre.sel(time=slice(*response_win)).mean(dim='time')
+    data_pre = imaging.select_time(data_pre, *response_win).mean(dim='time')
     data_post = data_mapping.sel(trial=data_mapping.coords['day'].isin([1, 2]))
-    data_post = data_post.sel(time=slice(*response_win)).mean(dim='time')
+    data_post = imaging.select_time(data_post, *response_win).mean(dim='time')
 
     lmi, lmi_p = imaging.compute_roc(data_pre, data_post, nshuffles=nshuffles)
     df.append(

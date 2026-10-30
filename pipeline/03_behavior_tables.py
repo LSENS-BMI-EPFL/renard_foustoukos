@@ -153,7 +153,7 @@ EXECUTION_DAYS = ['pre_-2', 'pre_-1', 'muscimol_1', 'ringer_1', 'muscimol_2']
 
 
 def muscimol_execution_table():
-    # Moved from revisions/figure_2b_c_execution.py, same selection.
+    # Execution cohort of Figure 2—figure supplement 1 (figures/figure2_supfig1).
     session_list, nwb_list, mice_list, _ = database.select_sessions_from_db(
         paths.db_path,
         paths.nwb_dir,

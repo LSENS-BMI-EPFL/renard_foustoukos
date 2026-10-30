@@ -5,38 +5,57 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
-# Set plot parameters.
-sns.set_theme(
-    context='paper',
-    style='ticks',
-    palette='deep',
-    font='sans-serif',
-    font_scale=1,
-    rc={
-        'pdf.fonttype': 42,
-        'ps.fonttype': 42,
-        'svg.fonttype': 'none',  # Ensures text is editable in SVGs
-        # 'svg.embed_char_paths': False,
-        'axes.linewidth': 0.8,
-        'xtick.major.width': 0.8,
-        'ytick.major.width': 0.8,
-        'xtick.minor.width': 0.8,
-        'ytick.minor.width': 0.8,
-        'xtick.major.size': 3,
-        'ytick.major.size': 3,
-        # Font sizes
-        'axes.labelsize': 6,
-        'xtick.labelsize': 6,
-        'ytick.labelsize': 6,
-        'axes.titlesize': 6,
-        'legend.fontsize': 6,
-        'font.size': 6,
-        'figure.titlesize': 6,
-        'figure.labelsize': 6,
-        'savefig.facecolor': 'white',
-        'axes.unicode_minus': False,  # Ensure minus signs are not used for tick marks
-    },
-)
+# Figures are drawn at their final printed size: one standard panel is about
+# 46 x 41 mm, the size of a panel in an A4 figure page, with 6 pt text, so that
+# they need no rescaling in Illustrator.
+PANEL_W = 1.8  # inches
+PANEL_H = 1.6
+
+STYLE_RC = {
+    'pdf.fonttype': 42,
+    'ps.fonttype': 42,
+    'svg.fonttype': 'none',  # Ensures text is editable in SVGs
+    'axes.linewidth': 0.8,
+    'xtick.major.width': 0.8,
+    'ytick.major.width': 0.8,
+    'xtick.minor.width': 0.8,
+    'ytick.minor.width': 0.8,
+    'xtick.major.size': 3,
+    'ytick.major.size': 3,
+    'lines.linewidth': 1.0,
+    'lines.markersize': 3,
+    'patch.linewidth': 0.5,
+    # Font sizes
+    'axes.labelsize': 6,
+    'xtick.labelsize': 6,
+    'ytick.labelsize': 6,
+    'axes.titlesize': 6,
+    'legend.fontsize': 6,
+    'legend.title_fontsize': 6,
+    'font.size': 6,
+    'figure.titlesize': 6,
+    'figure.labelsize': 6,
+    'savefig.facecolor': 'white',
+    'axes.unicode_minus': False,  # Ensure minus signs are not used for tick marks
+}
+
+
+def set_style():
+    """Plot style of all figures (seaborn 'paper' ticks theme, final-size fonts
+    and lines). Applied on import; figure scripts call it again before plotting
+    in case another call changed the theme."""
+    sns.set_theme(
+        context='paper', style='ticks', palette='deep', font='sans-serif', font_scale=1, rc=STYLE_RC
+    )
+
+
+def panel_size(ncols=1, nrows=1, w=1.0, h=1.0):
+    """Figure size (inches) for a grid of ncols x nrows standard panels, each
+    scaled by w (width) and h (height), e.g. w=0.7 for a two-bar plot."""
+    return (ncols * PANEL_W * w, nrows * PANEL_H * h)
+
+
+set_style()
 
 # # Color palettes.
 # reward_palette = sns.color_palette(['#c959affe', "#1ebe8e"])
@@ -51,8 +70,8 @@ sns.set_theme(
 # trial_type_nonrew_palette = sns.color_palette(['#06fcfeff', '#1f77b4', '#dda0dd', '#c959affe', '#8c8c8c', '#333333'])  # auditory misses, auditory hits, whisker misses, whisker hits, correct rejection, false alarm
 
 # Color palettes (more saturated for better distinguishability).
-reward_palette = sns.color_palette(['#D656AE', '#1BC477'])
-reward_palette_r = sns.color_palette(['#1BC477', '#D656AE'])
+reward_palette = sns.color_palette(['#c800c8', '#00b400'])
+reward_palette_r = sns.color_palette(['#00b400', '#c800c8'])
 cell_types_palette = sns.color_palette(
     ['#8c8c8c', '#2657CC', '#ff9600ff']
 )  # medium grey, vivid blue, bright orange
@@ -60,12 +79,12 @@ s2_m1_palette = sns.color_palette(['#2657CC', '#ff9600ff'])  # saturated steel b
 stim_palette = sns.color_palette(
     ['#2657CC', '#ff9600ff', '#222222']
 )  # saturated blue, vivid orange, dark neutral
-behavior_palette = sns.color_palette(['#0dddddff', '#2657CC', '#D656AE', '#1BC477', '#8c8c8c', '#222222'])
+behavior_palette = sns.color_palette(['#0dddddff', '#2657CC', '#c800c8', '#00b400', '#8c8c8c', '#222222'])
 trial_type_rew_palette = sns.color_palette(
-    ['#0dddddff', '#2657CC', "#94F5A5", '#1BC477', '#8c8c8c', '#222222']
+    ['#0dddddff', '#2657CC', "#94F5A5", '#00b400', '#8c8c8c', '#222222']
 )
 trial_type_nonrew_palette = sns.color_palette(
-    ['#0dddddff', '#2657CC', "#FFA2E3", '#D656AE', '#8c8c8c', '#222222']
+    ['#0dddddff', '#2657CC', "#FFA2E3", '#c800c8', '#8c8c8c', '#222222']
 )
 
 # # Color palettes.
@@ -203,6 +222,11 @@ lmi_cmap = mcolors.LinearSegmentedColormap.from_list(
     ],
 )
 
+
+# Subfolder of a figure folder for the control versions of its panels (other
+# thresholds, lick-free window, non-cross-validated participation), kept out
+# of the way of the panels to assemble.
+VARIANTS_DIR = 'variants'
 
 # Editable text when figures are opened in Illustrator (PDF, TrueType fonts)
 # or Inkscape (SVG, text kept as text).
